@@ -34,11 +34,11 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  JWT_PRIVATE_KEY: string;
+  JWT_PUBLIC_KEY_PATH: string;
 
   @IsString()
   @IsNotEmpty()
-  JWT_PUBLIC_KEY;
+  JWT_PRIVATE_KEY_PATH:string;
 }
 
 export function validate(config: Record<string, unknown>) {

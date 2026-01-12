@@ -8,7 +8,7 @@ import { AuthService } from '../services';
 @Injectable()
 export class SessionGuard implements CanActivate {
   constructor(
-    private readonly authService: AuthService,
+    private authService: AuthService,
     private reflector: Reflector,
   ) {}
 

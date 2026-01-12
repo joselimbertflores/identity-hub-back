@@ -1,6 +1,6 @@
-import { Body, Controller, Get } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 
-import { GetAuthUser } from 'src/modules/auth/decorators/get-user-request.decorator';
+import { GetAuthUser } from 'src/modules/auth/decorators';
 import { User } from 'src/modules/users/entities';
 import { HubService } from '../services';
 
@@ -12,10 +12,4 @@ export class HubController {
   getMyAcccess(@GetAuthUser() user: User) {
     return this.hubService.getUserApplications(user.id);
   }
-
-  // @Get('/me/applications')
-  // listApps(@Req() req) {}
-
-  // @Get('/sso/redirect')
-  // redirectToApp(@Req() req) {}
 }

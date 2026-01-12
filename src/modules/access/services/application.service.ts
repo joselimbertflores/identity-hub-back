@@ -19,6 +19,7 @@ export class ApplicationService {
   async create(clientDto: CreateApplicationDto) {
     try {
       const rawSecret = randomBytes(32).toString('hex');
+      console.log(rawSecret);
       const hashedSecret = await bcrypt.hash(rawSecret, 10);
       const client = this.clientRepository.create({ ...clientDto, clientSecret: hashedSecret });
       return await this.clientRepository.save(client);

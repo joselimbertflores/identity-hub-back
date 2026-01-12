@@ -1,4 +1,4 @@
-import { Column, Entity, OneToMany, CreateDateColumn, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, OneToMany, CreateDateColumn, PrimaryGeneratedColumn, BeforeInsert } from 'typeorm';
 import { UserApplication } from './user-application.entity';
 
 @Entity('applications')
@@ -41,4 +41,13 @@ export class Application {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @BeforeInsert()
+  generateClientId() {
+    this.clientId = this.clientId
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w-]+/g, '');
+  }
 }

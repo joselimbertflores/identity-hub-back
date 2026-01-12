@@ -12,10 +12,8 @@ export class AccessService {
   constructor(
     private dataSource: DataSource,
     private userService: UsersService,
-    @InjectRepository(Application)
-    private appRepository: Repository<Application>,
-    @InjectRepository(UserApplication)
-    private userAppRepository: Repository<UserApplication>,
+    @InjectRepository(Application) private appRepository: Repository<Application>,
+    @InjectRepository(UserApplication) private userAppRepository: Repository<UserApplication>,
   ) {}
 
   async provisionUserWithApplications(dto: CreateUserWithAccessDto) {

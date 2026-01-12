@@ -1,21 +1,16 @@
-import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import { RedisModule } from '@nestjs-modules/ioredis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Module } from '@nestjs/common';
 
-import KeyvRedis from '@keyv/redis';
 import { join } from 'path';
 
 import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
-
 import { EnvironmentVariables, validate } from './config';
-import Redis from 'ioredis';
-import { RedisModule } from '@nestjs-modules/ioredis';
-
-export const REDIS_CLIENT_KEY = 'REDIS_MICROSERVICE';
 
 @Module({
   imports: [

@@ -1,11 +1,10 @@
-import { Controller, Get, Post, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Res } from '@nestjs/common';
 
 import type { Response } from 'express';
 
-import { SessionGuard } from 'src/modules/auth/guards/session.guard';
 import { User } from 'src/modules/users/entities';
 
-import { Cookies, GetAuthUser } from '../decorators';
+import { Cookies, GetAuthUser, Public } from '../decorators';
 import { AuthService } from '../services';
 
 @Controller('auth')
@@ -13,11 +12,11 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Get('status')
-  @UseGuards(SessionGuard)
   checkAuthStatus(@GetAuthUser() user: User) {
     return { user: user };
   }
 
+  @Public()
   @Post('logout')
   async logout(@Cookies('session_id') sessionId: string | undefined, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.removeAuthSession(sessionId);

@@ -16,7 +16,7 @@ export class TokenService {
   ) {}
 
   async generateTokenPair(payload: AccessTokenPayload) {
-    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: "2min" });
+    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: "15min" });
     const refreshToken = crypto.randomUUID();
 
     const data: RefreshTokenPayload = {
