@@ -66,10 +66,11 @@ export class AuthService {
   }
 
   async createAuthSession(user: User) {
+    // * Central sessionId, logout global
     const sessionId = crypto.randomUUID();
-    const LABORAL_HOURS_MS = 10 * 60 * 60;
+    const LABORAL_HOURS_SECONDS = 10 * 60 * 60;
     const payload: AuthSessionPayload = { userId: user.id, fullName: user.fullName };
-    await this.redis.set(`session:${sessionId}`, JSON.stringify(payload), 'EX', LABORAL_HOURS_MS);
+    await this.redis.set(`session:${sessionId}`, JSON.stringify(payload), 'EX', LABORAL_HOURS_SECONDS);
     return sessionId;
   }
 

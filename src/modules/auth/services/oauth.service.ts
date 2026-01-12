@@ -4,14 +4,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+import { compare } from 'bcrypt';
 import Redis from 'ioredis';
 
 import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, LoginDto, GrantType } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
+
 import { Application } from 'src/modules/access/entities';
-import { AuthorizationCodePayload } from '../interfaces';
 import { User } from 'src/modules/users/entities';
+
+import { AuthorizationCodePayload } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
@@ -112,7 +114,7 @@ export class OAuthService {
     await this.redis.del(key);
 
     const user = await this.checkValidUser(context.userId);
-    console.log("CALL - exchange code");
+    console.log('CALL - exchange code');
     return await this.tokenService.generateTokenPair({
       sub: user.id,
       externalKey: user.externalKey,
@@ -131,7 +133,7 @@ export class OAuthService {
     }
 
     const user = await this.checkValidUser(data.userId);
-    console.log("CALL - refresh token");
+    console.log('CALL - refresh token');
     return await this.tokenService.generateTokenPair({
       sub: user.id,
       name: user.fullName,
@@ -170,7 +172,7 @@ export class OAuthService {
 
     if (app.isConfidential) {
       if (!clientSecret) throw new UnauthorizedException('Client secret is required.');
-      const isSecretValid = await bcrypt.compare(clientSecret, app.clientSecret);
+      const isSecretValid = await compare(clientSecret, app.clientSecret);
       if (!isSecretValid) {
         throw new UnauthorizedException('Invalid client secret.');
       }

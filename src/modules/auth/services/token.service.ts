@@ -8,15 +8,14 @@ import { AccessTokenPayload, RefreshTokenPayload } from '../interfaces';
 
 @Injectable()
 export class TokenService {
-  private readonly REFRESH_TTL = 60 * 60 * 24 * 7; // 7 días
-
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private jwtService: JwtService,
   ) {}
 
   async generateTokenPair(payload: AccessTokenPayload) {
-    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: "15min" });
+    // TTL 15min
+    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: '1h' });
     const refreshToken = crypto.randomUUID();
 
     const data: RefreshTokenPayload = {
@@ -24,15 +23,16 @@ export class TokenService {
       clientId: payload.clientId,
       scope: payload.scope,
     };
-
-    await this.redis.set(`refresh:${refreshToken}`, JSON.stringify(data), 'EX', this.REFRESH_TTL);
+    const REFRESH_TTL_SECONDS = 10 * 60 * 60;
+    await this.redis.set(`refresh:${refreshToken}`, JSON.stringify(data), 'EX', REFRESH_TTL_SECONDS);
     await this.redis.sadd(`user_refresh_tokens:${payload.sub}`, refreshToken);
 
     return {
       accessToken,
       refreshToken,
+      accessTokenExpiresIn: 3600, // seg
+      refreshTokenExpiresIn: REFRESH_TTL_SECONDS,
       tokenType: 'Bearer',
-      expiresIn: 900,
     };
   }
 
