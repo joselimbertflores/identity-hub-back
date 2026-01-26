@@ -13,7 +13,8 @@ export class CreateUserDto {
 
   @IsNotEmpty()
   @IsString()
-  relationKey: string;
+  @IsOptional()
+  relationKey?: string;
 
   @IsOptional()
   @IsArray()
