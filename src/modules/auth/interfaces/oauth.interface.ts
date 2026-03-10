@@ -3,4 +3,5 @@ export interface AuthorizationCodePayload {
   clientId: string;
   redirectUri: string;
   scope?: string;
+  createdAt: number;
 }

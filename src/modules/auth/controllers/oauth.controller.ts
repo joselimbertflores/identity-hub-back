@@ -11,6 +11,30 @@ import { OAuthService } from '../services';
 export class OAuthController {
   constructor(private readonly oAuthService: OAuthService) {}
 
+  /**
+   * OAuth Authorization Endpoint
+   *
+   * Este endpoint inicia el flujo OAuth Authorization Code.
+   *
+   * Flujo esperado:
+   *
+   * CLIENT → GET /oauth/authorize
+   *      ↓
+   * Identity Hub valida cliente y redirect_uri
+   *      ↓
+   * Si el usuario NO tiene sesión:
+   *      guardar request pendiente en Redis
+   *      redirigir al login del Identity Hub
+   *
+   * Si el usuario YA tiene sesión:
+   *      verificar que el usuario tenga acceso a la aplicación
+   *      generar authorization code
+   *      redirigir al cliente con:
+   *          redirect_uri?code=...&state=...
+   *
+   * El parámetro `state` es generado por el cliente y se devuelve intacto
+   * para evitar ataques CSRF en el flujo OAuth.
+   */
   @Public()
   @Get('authorize')
   async authorize(
@@ -19,6 +43,7 @@ export class OAuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const url = await this.oAuthService.handleAuthorizeRequest(query, sessionId);
+     // Siempre redirige al siguiente paso del flujo OAuth
     return res.redirect(url);
   }
 
@@ -27,11 +52,13 @@ export class OAuthController {
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
     try {
       const sessionId = await this.oAuthService.handleLoginRequest(body);
+
+      // max age like laboral hours
       res.cookie('session_id', sessionId, {
         httpOnly: true,
         sameSite: 'lax',
         secure: false,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: 10 * 60 * 60 * 1000,
       });
 
       const redirectUrl = await this.oAuthService.resumeAuthorizeFlow(queryParams);

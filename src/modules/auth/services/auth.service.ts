@@ -11,12 +11,14 @@ import { UserApplication } from 'src/modules/access/entities';
 import { AuthSessionPayload } from '../interfaces';
 import { User } from 'src/modules/users/entities';
 import { LoginDto } from '../dtos';
+import { TokenService } from './token.service';
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRedis() private readonly redis: Redis,
     @InjectRepository(User) private userRepository: Repository<User>,
     @InjectRepository(UserApplication) private userAppRepository: Repository<UserApplication>,
+    private tokenService: TokenService,
   ) {}
 
   async authenticateUser({ login, password }: LoginDto): Promise<User> {
@@ -30,7 +32,7 @@ export class AuthService {
       throw new AuthException(AuthErrorCode.INVALID_CREDENTIALS);
     }
 
-    const isValid = bcrypt.compareSync(password, userDB.password);
+    const isValid = await bcrypt.compare(password, userDB.password);
     if (!isValid) {
       throw new AuthException(AuthErrorCode.INVALID_CREDENTIALS);
     }
@@ -81,16 +83,37 @@ export class AuthService {
   }
 
   async removeAuthSession(sessionId: string | undefined) {
-    if (!sessionId) throw new BadRequestException('Invalid session id');
-    const isDeleted = await this.redis.del(`session:${sessionId}`);
+    if (!sessionId) {
+      throw new BadRequestException('Invalid session id');
+    }
+
+    const sessionRaw = await this.redis.get(`session:${sessionId}`);
+
+    if (!sessionRaw) {
+      return {
+        ok: true,
+        message: 'Session is already logged out',
+      };
+    }
+
+    const session = JSON.parse(sessionRaw) as AuthSessionPayload;
+
+    // revocar refresh tokens
+    await this.tokenService.revokeAllForUser(session.userId);
+
+    // eliminar sesión
+    await this.redis.del(`session:${sessionId}`);
+
     return {
       ok: true,
-      message: isDeleted ? 'Logout successful' : 'Session is already logged out',
+      message: 'Logout successful',
     };
   }
 
   async checkUserAppAccess(userId: string, applicationId: number) {
-    const hasAccess = await this.userAppRepository.findOne({ where: { userId, applicationId } });
+    const hasAccess = await this.userAppRepository.findOne({
+      where: { user: { id: userId, isActive: true }, applicationId },
+    });
     if (!hasAccess) {
       throw new AuthException(AuthErrorCode.NOT_APPLICATION_ACCESS);
     }

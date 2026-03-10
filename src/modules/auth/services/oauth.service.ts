@@ -29,26 +29,64 @@ export class OAuthService {
     private authService: AuthService,
   ) {}
 
+  /**
+   * Maneja la lógica del endpoint /oauth/authorize.
+   *
+   * Responsabilidades:
+   *
+   * 1. Validar cliente (client_id)
+   * 2. Validar redirect_uri
+   * 3. Verificar sesión del usuario en Identity Hub
+   * 4. Si no hay sesión → redirigir a login
+   * 5. Si hay sesión → verificar acceso del usuario a la aplicación
+   * 6. Generar authorization code
+   * 7. Redirigir al cliente con code + state
+   */
   async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId?: string) {
     const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
     if (!app) throw new UnauthorizedException('Invalid client.');
     if (!app.redirectUris.includes(params.redirectUri)) throw new UnauthorizedException('Invalid redirect uri.');
 
     const session = sessionId ? await this.authService.getAuthSession(sessionId) : null;
+    /**
+     * Si el usuario no tiene sesión:
+     * guardamos el request OAuth temporalmente en Redis
+     * y redirigimos al login del Identity Hub.
+     */
     if (!session) {
       const oAuthRequestId = await this.createPendingOAuthRequest(params);
       const loginUrl = new URL(this.configService.getOrThrow('IDENTITY_HUB_LOGIN_PATH'));
+      // auth_request_id permite reanudar el flujo después del login
       loginUrl.searchParams.set('auth_request_id', oAuthRequestId);
       return loginUrl.toString();
     }
 
+    /**
+     * 4. El usuario ya tiene sesión en Identity Hub
+     * verificamos que tenga acceso a la aplicación solicitada.
+     */
     await this.authService.checkUserAppAccess(session.userId, app.id);
 
+    /**
+     * Generar authorization code
+     *
+     * Este code se almacenará temporalmente en Redis
+     * y será intercambiado posteriormente en /oauth/token.
+     */
     const code = await this.createAuthCode(session.userId, params);
 
     const resultUrl = new URL(params.redirectUri);
 
+    // El cliente recibirá este code para intercambiarlo por tokens
     resultUrl.searchParams.set('code', code);
+
+    /**
+     * El parámetro state es devuelto intacto al cliente.
+     * El cliente debe validar que coincida con el enviado originalmente.
+     */
+    if (params.state) {
+      resultUrl.searchParams.set('state', params.state);
+    }
 
     return resultUrl.toString();
   }
@@ -65,6 +103,17 @@ export class OAuthService {
       : this.handleRefreshTokenGrant(dto, app);
   }
 
+  /**
+   * Reanuda el flujo OAuth después del login.
+   *
+   * Si el login fue iniciado por un cliente OAuth,
+   * existirá auth_request_id y se reconstruirá el
+   * request /oauth/authorize original.
+   *
+   * Si el login fue directo al Identity Hub,
+   * no habrá auth_request_id y el usuario será
+   * redirigido al portal de aplicaciones.
+   */
   async resumeAuthorizeFlow({ authRequestId }: LoginParamsDto) {
     const loginUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_APPS_PATH');
     if (!authRequestId) return loginUrl;
@@ -144,6 +193,17 @@ export class OAuthService {
     });
   }
 
+  /**
+   * Genera un Authorization Code OAuth.
+   *
+   * Características:
+   * - uso único
+   * - TTL corto (5 minutos)
+   * - almacenado en Redis
+   *
+   * Este code será intercambiado en /oauth/token
+   * para obtener access_token y refresh_token.
+   */
   private async createAuthCode(userId: string, { clientId, redirectUri, scope }: AuthorizeParamsDto) {
     const code = crypto.randomUUID();
     const key = `auth_code:${code}`;
@@ -152,8 +212,10 @@ export class OAuthService {
       clientId,
       redirectUri,
       scope,
+      createdAt: Date.now(),
     };
-    await this.redis.set(key, JSON.stringify(payload), 'EX', 5 * 60 * 1000);
+    // Authorization codes viven poco tiempo
+    await this.redis.set(key, JSON.stringify(payload), 'EX', 5 * 60);
     return code;
   }
 
@@ -180,10 +242,22 @@ export class OAuthService {
     return app;
   }
 
+  /**
+   * Guarda temporalmente una solicitud OAuth pendiente.
+   *
+   * Esto permite el flujo:
+   *
+   * authorize → login → authorize
+   *
+   * Cuando el usuario hace login, el sistema recupera esta
+   * solicitud para continuar el flujo original.
+   *
+   * TTL corto para evitar reutilización o almacenamiento prolongado.
+   */
   private async createPendingOAuthRequest(params: AuthorizeParamsDto) {
     const oAuthRequestId = crypto.randomUUID();
     const key = `pending_oauth:${oAuthRequestId}`;
-    await this.redis.set(key, JSON.stringify(params), 'EX', 5 * 60 * 1000);
+    await this.redis.set(key, JSON.stringify(params), 'EX', 5 * 60);
     return oAuthRequestId;
   }
 

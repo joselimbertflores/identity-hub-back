@@ -24,8 +24,7 @@ export class AuthorizeParamsDto {
 
   @IsString()
   @IsNotEmpty()
-  @IsOptional()
-  state?: string;
+  state: string;
 }
 export class LoginDto {
   @IsNotEmpty()
