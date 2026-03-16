@@ -42,7 +42,7 @@ export class OAuthService {
    * 6. Generar authorization code
    * 7. Redirigir al cliente con code + state
    */
-  async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId?: string) {
+  async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined) {
     const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
     if (!app) throw new UnauthorizedException('Invalid client.');
     if (!app.redirectUris.includes(params.redirectUri)) throw new UnauthorizedException('Invalid redirect uri.');
@@ -65,7 +65,16 @@ export class OAuthService {
      * 4. El usuario ya tiene sesión en Identity Hub
      * verificamos que tenga acceso a la aplicación solicitada.
      */
-    await this.authService.checkUserAppAccess(session.userId, app.id);
+    const hasAccess = await this.authService.checkUserAppAccess(session.userId, app.id);
+    console.log(hasAccess);
+    if (!hasAccess) {
+      // No tiene acceso devolver al cliente para que maneje su vista de error
+      const url = new URL(params.redirectUri);
+      url.searchParams.set('error', 'access_denied');
+      if (params.state) url.searchParams.set('state', params.state);
+      console.log(url.toString());
+      return url.toString();
+    }
 
     /**
      * Generar authorization code

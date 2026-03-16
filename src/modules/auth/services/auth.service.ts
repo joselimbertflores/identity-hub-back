@@ -114,8 +114,6 @@ export class AuthService {
     const hasAccess = await this.userAppRepository.findOne({
       where: { user: { id: userId, isActive: true }, applicationId },
     });
-    if (!hasAccess) {
-      throw new AuthException(AuthErrorCode.NOT_APPLICATION_ACCESS);
-    }
+    return hasAccess ? true : false;
   }
 }
