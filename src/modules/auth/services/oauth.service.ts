@@ -66,13 +66,12 @@ export class OAuthService {
      * verificamos que tenga acceso a la aplicación solicitada.
      */
     const hasAccess = await this.authService.checkUserAppAccess(session.userId, app.id);
-    console.log(hasAccess);
     if (!hasAccess) {
       // No tiene acceso devolver al cliente para que maneje su vista de error
       const url = new URL(params.redirectUri);
       url.searchParams.set('error', 'access_denied');
+      url.searchParams.set('client_name', app.name);
       if (params.state) url.searchParams.set('state', params.state);
-      console.log(url.toString());
       return url.toString();
     }
 
