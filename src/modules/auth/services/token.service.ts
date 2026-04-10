@@ -14,8 +14,12 @@ export class TokenService {
   ) {}
 
   async generateTokenPair(payload: AccessTokenPayload) {
+    const ACCESS_TTL_SECONDS = 10 * 60;
+    const REFRESH_TTL_SECONDS = 10 * 60 * 60;
+
     // TTL 15min
-    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: '1h' });
+    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: ACCESS_TTL_SECONDS });
+
     const refreshToken = crypto.randomUUID();
 
     const data: RefreshTokenPayload = {
@@ -23,14 +27,14 @@ export class TokenService {
       clientId: payload.clientId,
       scope: payload.scope,
     };
-    const REFRESH_TTL_SECONDS = 10 * 60 * 60;
+
     await this.redis.set(`refresh:${refreshToken}`, JSON.stringify(data), 'EX', REFRESH_TTL_SECONDS);
     await this.redis.sadd(`user_refresh_tokens:${payload.sub}`, refreshToken);
 
     return {
       accessToken,
       refreshToken,
-      accessTokenExpiresIn: 3600, // seg
+      accessTokenExpiresIn: ACCESS_TTL_SECONDS, // seg
       refreshTokenExpiresIn: REFRESH_TTL_SECONDS,
       tokenType: 'Bearer',
     };
@@ -56,7 +60,7 @@ export class TokenService {
     const setKey = `user_refresh_tokens:${userId}`;
     const tokens = await this.redis.smembers(setKey);
 
-    if (tokens.length === 0) return;
+    // if (tokens.length === 0) return;
 
     const pipeline = this.redis.pipeline();
 

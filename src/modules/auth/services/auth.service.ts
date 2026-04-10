@@ -84,7 +84,11 @@ export class AuthService {
 
   async removeAuthSession(sessionId: string | undefined) {
     if (!sessionId) {
-      throw new BadRequestException('Invalid session id');
+      // throw new BadRequestException('Invalid session id');
+      return {
+        ok: true,
+        message: 'Session is already logged out',
+      };
     }
 
     const sessionRaw = await this.redis.get(`session:${sessionId}`);
