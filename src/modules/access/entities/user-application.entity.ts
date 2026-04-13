@@ -10,7 +10,7 @@ export class UserApplication {
   id: string;
 
   @ManyToOne(() => User, (user) => user.userApplications, { onDelete: 'CASCADE' })
-  public user: User;
+  user: User;
 
   @ManyToOne(() => Application, (system) => system.userApplications, {
     onDelete: 'CASCADE',

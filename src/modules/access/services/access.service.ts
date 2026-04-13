@@ -1,128 +1,168 @@
-import { Injectable, BadRequestException, HttpException, InternalServerErrorException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Injectable, BadRequestException } from '@nestjs/common';
 
-import { User } from 'src/modules/users/entities';
+import { EntityManager, In } from 'typeorm';
+
 import { Application, UserApplication } from '../entities';
-import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from '../dtos';
-import { UsersService } from 'src/modules/users/users.service';
 
 @Injectable()
 export class AccessService {
-  constructor(
-    private dataSource: DataSource,
-    private userService: UsersService,
-    @InjectRepository(Application) private appRepository: Repository<Application>,
-    @InjectRepository(UserApplication) private userAppRepository: Repository<UserApplication>,
-  ) {}
+  constructor() {}
 
-  async provisionUserWithApplications(dto: CreateUserWithAccessDto) {
-    const queryRunner = this.dataSource.createQueryRunner();
+  async syncApplications(userId: string, applicationIds: number[], manager: EntityManager) {
+    const userApprepository = manager.getRepository(UserApplication);
+    const appRepository = manager.getRepository(Application);
 
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const uniqueIds = [...new Set(applicationIds)];
 
-    try {
-      const user = await this.userService.create(dto, queryRunner.manager);
+    const applications = await appRepository.find({ where: { id: In(uniqueIds) }, select: ['id'] });
 
-      await this.syncUserApplications(
-        {
-          userId: user.id,
-          applicationIds: dto.applicationIds,
-        },
-        queryRunner.manager,
-      );
-      const createdUser = queryRunner.manager.getRepository(User).findOne({
-        where: { id: user.id },
-        relations: { userApplications: { application: true } },
-      });
-      await queryRunner.commitTransaction();
+    if (applications.length !== uniqueIds.length) {
+      throw new BadRequestException('One or more applications are invalid');
+    }
 
-      return createdUser;
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      if (!queryRunner.isReleased) await queryRunner.rollbackTransaction();
-      throw new InternalServerErrorException('Error create user/apps');
-    } finally {
-      await queryRunner.release();
+    const currentRelations = await userApprepository.find({ where: { userId }, select: ['id', 'applicationId'] });
+
+    const currentIds = currentRelations.map((item) => item.applicationId);
+
+    const idsToAdd = uniqueIds.filter((id) => !currentIds.includes(id));
+    const idsToRemove = currentIds.filter((id) => !uniqueIds.includes(id));
+
+    if (idsToRemove.length > 0) {
+      await userApprepository.delete({ userId, applicationId: In(idsToRemove) });
+    }
+
+    if (idsToAdd.length > 0) {
+      const rows = idsToAdd.map((applicationId) => userApprepository.create({ userId, applicationId }));
+      await userApprepository.save(rows);
     }
   }
 
-  async updateUserWithApplications(id: string, dto: UpdateUserWithAccessDto) {
-    const queryRunner = this.dataSource.createQueryRunner();
+  // async provisionUserWithApplications(dto: CreateUserWithAccessDto) {
+  //   const queryRunner = this.dataSource.createQueryRunner();
 
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+  //   await queryRunner.connect();
+  //   await queryRunner.startTransaction();
 
-    try {
-      const user = await this.userService.update(id, dto, queryRunner.manager);
+  //   try {
+  //     const { user, password } = await this.userService.create(dto, queryRunner.manager);
 
-      if (dto.applicationIds) {
-        await this.syncUserApplications(
-          {
-            userId: user.id,
-            applicationIds: dto.applicationIds,
-          },
-          queryRunner.manager,
-        );
-      }
+  //     await this.syncUserApplications(
+  //       {
+  //         userId: user.id,
+  //         applicationIds: dto.applicationIds,
+  //       },
+  //       queryRunner.manager,
+  //     );
+  //     const createdUser = await queryRunner.manager.getRepository(User).findOne({
+  //       where: { id: user.id },
+  //       relations: { userApplications: { application: true } },
+  //     });
 
-      const updatedUser = await queryRunner.manager.getRepository(User).findOne({
-        where: { id: user.id },
-        relations: { userApplications: { application: true } },
-      });
+  //     await queryRunner.commitTransaction();
 
-      await queryRunner.commitTransaction();
-      return updatedUser;
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      await queryRunner.rollbackTransaction();
-      throw new InternalServerErrorException('Error update user/apps');
-    } finally {
-      await queryRunner.release();
-    }
-  }
+  //     const pdf = await this.generatePdf({ ...user, password });
+  //     return { user: createdUser, credentialsPdfBase64: pdf.toString('base64') };
+  //   } catch (error) {
+  //     if (error instanceof HttpException) throw error;
+  //     if (!queryRunner.isReleased) await queryRunner.rollbackTransaction();
+  //     throw new InternalServerErrorException('Error create user/apps');
+  //   } finally {
+  //     await queryRunner.release();
+  //   }
+  // }
 
-  private async syncUserApplications(dto: { userId: string; applicationIds: number[] }, manager?: EntityManager) {
-    const userAppRepo = manager ? manager.getRepository(UserApplication) : this.userAppRepository;
+  // async updateUserWithApplications(id: string, dto: UpdateUserWithAccessDto) {
+  //   const queryRunner = this.dataSource.createQueryRunner();
 
-    const appRepo = manager ? manager.getRepository(Application) : this.appRepository;
+  //   await queryRunner.connect();
+  //   await queryRunner.startTransaction();
 
-    const { userId, applicationIds } = dto;
+  //   try {
+  //     const user = await this.userService.update(id, dto, queryRunner.manager);
 
-    const applications = await appRepo.find({
-      where: { id: In(applicationIds) },
-    });
+  //     if (dto.applicationIds) {
+  //       await this.syncUserApplications(
+  //         {
+  //           userId: user.id,
+  //           applicationIds: dto.applicationIds,
+  //         },
+  //         queryRunner.manager,
+  //       );
+  //     }
 
-    if (applications.length !== applicationIds.length) {
-      throw new BadRequestException('Some applications do not exist');
-    }
+  //     const updatedUser = await queryRunner.manager.getRepository(User).findOne({
+  //       where: { id: user.id },
+  //       relations: { userApplications: { application: true } },
+  //     });
 
-    const current = await userAppRepo.find({
-      where: { user: { id: userId } },
-      relations: { application: true },
-    });
+  //     await queryRunner.commitTransaction();
+  //     return updatedUser;
+  //   } catch (error) {
+  //     if (error instanceof HttpException) throw error;
+  //     await queryRunner.rollbackTransaction();
+  //     throw new InternalServerErrorException('Error update user/apps');
+  //   } finally {
+  //     await queryRunner.release();
+  //   }
+  // }
 
-    const currentIds = new Set(current.map((a) => a.application.id));
-    const desiredIds = new Set(applicationIds);
+  // async resetCredentials(userId: string) {
+  //   const { user, password } = await this.userService.resetPassword(userId);
 
-    const toRemove = current.filter((a) => !desiredIds.has(a.application.id));
+  //   const pdfBuffer = await this.generatePdf({ ...user, password });
 
-    const toAdd = applications
-      .filter((app) => !currentIds.has(app.id))
-      .map((app) =>
-        userAppRepo.create({
-          user: { id: userId },
-          application: app,
-        }),
-      );
+  //   return {
+  //     user,
+  //     credentialsPdfBase64: pdfBuffer.toString('base64'),
+  //   };
+  // }
 
-    if (toRemove.length) {
-      await userAppRepo.remove(toRemove);
-    }
+  // private async syncUserApplications(dto: { userId: string; applicationIds: number[] }, manager?: EntityManager) {
+  //   const userAppRepo = manager ? manager.getRepository(UserApplication) : this.userAppRepository;
 
-    if (toAdd.length) {
-      await userAppRepo.save(toAdd);
-    }
-  }
+  //   const appRepo = manager ? manager.getRepository(Application) : this.appRepository;
+
+  //   const { userId, applicationIds } = dto;
+
+  //   const applications = await appRepo.find({
+  //     where: { id: In(applicationIds) },
+  //   });
+
+  //   if (applications.length !== applicationIds.length) {
+  //     throw new BadRequestException('Some applications do not exist');
+  //   }
+
+  //   const current = await userAppRepo.find({
+  //     where: { user: { id: userId } },
+  //     relations: { application: true },
+  //   });
+
+  //   const currentIds = new Set(current.map((a) => a.application.id));
+  //   const desiredIds = new Set(applicationIds);
+
+  //   const toRemove = current.filter((a) => !desiredIds.has(a.application.id));
+
+  //   const toAdd = applications
+  //     .filter((app) => !currentIds.has(app.id))
+  //     .map((app) =>
+  //       userAppRepo.create({
+  //         user: { id: userId },
+  //         application: app,
+  //       }),
+  //     );
+
+  //   if (toRemove.length) {
+  //     await userAppRepo.remove(toRemove);
+  //   }
+
+  //   if (toAdd.length) {
+  //     await userAppRepo.save(toAdd);
+  //   }
+  // }
+
+  // private async generatePdf({ fullName, login, password }: User) {
+  //   const pdfContent = userCredentialsTemplate({ fullName, login, password });
+  //   const pdfBuffer = await this.printer.createPdfBuffer(pdfContent);
+  //   return pdfBuffer;
+  // }
 }

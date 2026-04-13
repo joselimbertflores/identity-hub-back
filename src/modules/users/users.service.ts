@@ -19,7 +19,6 @@ export class UsersService {
     const [users, total] = await this.userRepository.findAndCount({
       take: limit,
       skip: offset,
-      select: { password: false },
       ...(term && {
         where: { fullName: ILike(`%${term}%`) },
       }),
@@ -38,18 +37,21 @@ export class UsersService {
     if (duplicate) {
       throw new BadRequestException(`Duplicate login: ${dto.login}`);
     }
+
     const externalKey = `IDH-U-${ulid()}`;
 
-    const rawPassword = this.generateSecurePassword();
-    const passwordHash = await this.encryptPassword(rawPassword);
+    const password = this.generateSecurePassword();
+    const passwordHash = await this.encryptPassword(password);
 
-    const user = repository.create({
+    const model = repository.create({
       ...dto,
       password: passwordHash,
       externalKey,
     });
 
-    return repository.save(user);
+    const user = await repository.save(model);
+
+    return { user, password };
   }
 
   async update(id: string, dto: UpdateUserDto, manager?: EntityManager) {
@@ -57,20 +59,17 @@ export class UsersService {
 
     const userDB = await repository.findOneBy({ id });
 
-    if (!userDB) throw new NotFoundException(`El usuario editado no existe`);
-    if (dto.login && userDB.login !== dto.login) {
-      const duplicate = await repository.findOne({
-        where: { login: dto.login },
-      });
+    if (!userDB) throw new NotFoundException(`User ${id} not found`);
 
-      if (duplicate) {
-        throw new BadRequestException(`Duplicate login: ${dto.login}`);
-      }
+    if (dto.login && userDB.login !== dto.login) {
+      const duplicate = await repository.findOne({ where: { login: dto.login } });
+
+      if (duplicate) throw new BadRequestException(`Duplicate login: ${dto.login}`);
     }
-    return await repository.save({
-      ...userDB,
-      ...dto,
-    });
+
+    Object.assign(userDB, dto);
+
+    return await repository.save(userDB);
   }
 
   async findByExternalKey(id: string) {
@@ -87,6 +86,40 @@ export class UsersService {
       ...userDB,
       password: passwordHash,
     });
+  }
+
+  async resetTemporaryPassword(id: string) {
+    const user = await this.userRepository.findOne({ where: { id } });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const password = this.generateSecurePassword();
+    const encryptPassword = await this.encryptPassword(password);
+
+    user.password = encryptPassword;
+    user.mustChangePassword = true;
+
+    await this.userRepository.save(user);
+
+    return { user, password };
+  }
+
+  async findOneWithApplications(id: string, manager?: EntityManager): Promise<User> {
+    const repository = manager ? manager.getRepository(User) : this.userRepository;
+    const user = await repository.findOne({
+      where: { id },
+      relations: {
+        userApplications: {
+          application: true,
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
   }
 
   private async encryptPassword(password: string) {

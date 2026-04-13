@@ -1,6 +1,15 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsNotEmpty, IsNumber, IsString } from 'class-validator';
+import {
+  ArrayMinSize,
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsString,
+} from 'class-validator';
 import { CreateUserDto } from 'src/modules/users/dtos';
 
 export class CreateAssigmentDto {
@@ -17,8 +26,10 @@ export class CreateAssigmentDto {
 
 export class CreateUserWithAccessDto extends CreateUserDto {
   @IsArray()
+  @ArrayUnique()
+  @ArrayNotEmpty()
   @Type(() => Number)
-  @IsNumber({}, { each: true })
+  @IsInt({ each: true })
   applicationIds: number[];
 }
 

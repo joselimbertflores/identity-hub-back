@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
-import PdfPrinter from 'pdfmake';
+import pdfMake from 'pdfmake';
+import { TDocumentDefinitions } from 'pdfmake/interfaces';
 
 const fonts = {
   Roboto: {
@@ -11,7 +12,13 @@ const fonts = {
   },
 };
 
+pdfMake.addFonts(fonts);
+
 @Injectable()
 export class PrinterService {
-  private printer = new PdfPrinter(fonts);
+  async createPdfBuffer(docDefinition: TDocumentDefinitions): Promise<Buffer> {
+    const pdf = pdfMake.createPdf(docDefinition);
+    const buffer = await pdf.getBuffer();
+    return buffer;
+  }
 }

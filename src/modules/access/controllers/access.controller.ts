@@ -18,13 +18,18 @@ export class AccessController {
     return this.applicationService.getAllActive();
   }
 
-  @Post()
-  create(@Body() body: CreateUserWithAccessDto) {
-    return this.assigmentService.provisionUserWithApplications(body);
-  }
+  // @Post()
+  // create(@Body() body: CreateUserWithAccessDto) {
+  //   return this.assigmentService.provisionUserWithApplications(body);
+  // }
 
-  @Put('/:userId')
-  update(@Param('userId') userId: string, @Body() body: UpdateUserWithAccessDto) {
-    return this.assigmentService.updateUserWithApplications(userId, body);
-  }
+  // @Put('/:userId')
+  // update(@Param('userId') userId: string, @Body() body: UpdateUserWithAccessDto) {
+  //   return this.assigmentService.updateUserWithApplications(userId, body);
+  // }
+
+  // @Post(':id/reset-credentials')
+  // resetCredentials(@Param('id') id: string) {
+  //   return this.assigmentService.resetCredentials(id);
+  // }
 }
