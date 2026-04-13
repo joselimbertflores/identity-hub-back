@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException, Injectable } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { EntityManager, ILike, Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
 
@@ -39,7 +40,8 @@ export class UsersService {
     }
     const externalKey = `IDH-U-${ulid()}`;
 
-    const passwordHash = await this.encryptPassword('123456');
+    const rawPassword = this.generateSecurePassword();
+    const passwordHash = await this.encryptPassword(rawPassword);
 
     const user = repository.create({
       ...dto,
@@ -89,5 +91,9 @@ export class UsersService {
 
   private async encryptPassword(password: string) {
     return await bcrypt.hash(password, 12);
+  }
+
+  private generateSecurePassword(length = 12): string {
+    return randomBytes(length).toString('base64').slice(0, length);
   }
 }

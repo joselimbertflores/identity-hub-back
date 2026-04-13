@@ -11,6 +11,7 @@ import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EnvironmentVariables, validate } from './config';
+import { PrinterModule } from './modules/printer/printer.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { EnvironmentVariables, validate } from './config';
     AuthModule,
     UsersModule,
     AccessModule,
+    PrinterModule,
   ],
   controllers: [],
   providers: [],

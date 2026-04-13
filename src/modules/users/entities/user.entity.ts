@@ -32,6 +32,9 @@ export class User {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ default: true })
+  mustChangePassword: true;
+
   @Column({
     type: 'enum',
     enum: UserRole,

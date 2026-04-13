@@ -5,6 +5,8 @@
 /public
 /keys
 
+/public
+
 # Logs
 logs
 *.log
