@@ -20,24 +20,24 @@ export class TokenRequestDto {
   @Expose({ name: 'client_secret' })
   clientSecret?: string;
 
-  @ValidateIf((o) => o.grantType === GrantType.AUTHORIZATION_CODE)
+  @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)
   @IsString()
   @IsNotEmpty()
   code?: string;
 
-  @ValidateIf((o) => o.grantType === GrantType.AUTHORIZATION_CODE)
+  @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)
   @IsString()
   @IsNotEmpty()
   @Expose({ name: 'redirect_uri' })
   redirectUri?: string;
 
-  @ValidateIf((o) => o.grantType === GrantType.AUTHORIZATION_CODE)
+  @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)
   @IsOptional()
   @IsString()
   @Expose({ name: 'code_verifier' })
   codeVerifier?: string;
 
-  @ValidateIf((o) => o.grantType === GrantType.REFRESH_TOKEN)
+  @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.REFRESH_TOKEN)
   @IsString()
   @IsNotEmpty()
   @Expose({ name: 'refresh_token' })

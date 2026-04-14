@@ -105,6 +105,23 @@ export class UsersService {
     return { user, password };
   }
 
+  async changePassword(id: string, newPassword: string) {
+    const user = await this.userRepository.findOne({ where: { id } });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const passwordHash = await this.encryptPassword(newPassword);
+
+    user.password = passwordHash;
+    user.mustChangePassword = false;
+
+    await this.userRepository.save(user);
+
+    return { message: 'Password changed successfully' };
+  }
+
   async findOneWithApplications(id: string, manager?: EntityManager): Promise<User> {
     const repository = manager ? manager.getRepository(User) : this.userRepository;
     const user = await repository.findOne({
