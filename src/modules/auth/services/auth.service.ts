@@ -8,10 +8,10 @@ import Redis from 'ioredis';
 
 import { AuthException, AuthErrorCode } from '../exceptions/auth.exception';
 import { UserApplication } from 'src/modules/access/entities';
-import { AuthSessionPayload } from '../interfaces';
+import { AuthSessionPayload, AuthUser } from '../interfaces';
 import { User } from 'src/modules/users/entities';
-import { LoginDto } from '../dtos';
 import { TokenService } from './token.service';
+import { LoginDto } from '../dtos';
 @Injectable()
 export class AuthService {
   constructor(
@@ -44,7 +44,7 @@ export class AuthService {
     return userDB;
   }
 
-  async validateSession(sessionId: string) {
+  async validateSession(sessionId: string): Promise<AuthUser> {
     const payload = await this.redis.get(`session:${sessionId}`);
     if (!payload) {
       throw new UnauthorizedException('Session not found');
@@ -60,10 +60,12 @@ export class AuthService {
     if (!user.isActive) {
       throw new UnauthorizedException(`User is disabled`);
     }
+
     return {
       id: user.id,
       fullName: user.fullName,
       roles: user.roles,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 
@@ -102,7 +104,7 @@ export class AuthService {
 
     const session = JSON.parse(sessionRaw) as AuthSessionPayload;
 
-    // revocar refresh tokens
+    // revoca refresh tokens
     await this.tokenService.revokeAllForUser(session.userId);
 
     // eliminar sesión

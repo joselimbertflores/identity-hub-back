@@ -85,6 +85,7 @@ export class UsersService {
     return await this.userRepository.save({
       ...userDB,
       password: passwordHash,
+      mustChangePassword: false,
     });
   }
 

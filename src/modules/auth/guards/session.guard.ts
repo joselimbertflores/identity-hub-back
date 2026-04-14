@@ -27,6 +27,7 @@ export class SessionGuard implements CanActivate {
     const user = await this.authService.validateSession(sessionId);
 
     req['user'] = user;
+    
     return true;
   }
 }

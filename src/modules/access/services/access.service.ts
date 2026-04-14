@@ -8,7 +8,7 @@ import { Application, UserApplication } from '../entities';
 export class AccessService {
   constructor() {}
 
-  async syncApplications(userId: string, applicationIds: number[], manager: EntityManager) {
+  async syncApplications(userId: string, applicationIds: number[], manager: EntityManager): Promise<void> {
     const userApprepository = manager.getRepository(UserApplication);
     const appRepository = manager.getRepository(Application);
 

@@ -8,6 +8,7 @@ import { jwtPrivateKey, jwtPublicKey } from './config/jwt.config';
 import { UsersModule } from '../users/users.module';
 import { AccessModule } from '../access/access.module';
 import { SessionGuard } from './guards/session.guard';
+import { PasswordChangeGuard } from './guards';
 
 @Module({
   controllers: [OAuthController, AuthController, JwksController],
@@ -19,6 +20,10 @@ import { SessionGuard } from './guards/session.guard';
     {
       provide: APP_GUARD,
       useClass: SessionGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: PasswordChangeGuard,
     },
   ],
   imports: [

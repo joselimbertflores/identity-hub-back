@@ -2,12 +2,11 @@ import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
 
 import type { Response } from 'express';
 
-import { User } from 'src/modules/users/entities';
-
-import { Cookies, GetAuthUser, Public } from '../decorators';
-import { AuthService } from '../services';
+import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
 import { UsersService } from 'src/modules/users/users.service';
 import { UpdateUserProfileDto } from 'src/modules/users/dtos';
+import { AuthService } from '../services';
+import type { AuthUser } from '../interfaces';
 
 @Controller('auth')
 export class AuthController {
@@ -16,9 +15,10 @@ export class AuthController {
     private userService: UsersService,
   ) {}
 
+  @AllowPasswordChange()
   @Get('status')
-  checkAuthStatus(@GetAuthUser() user: User) {
-    return { user: user };
+  checkAuthStatus(@GetAuthUser() user: AuthUser) {
+    return { user };
   }
 
   @Public()

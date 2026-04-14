@@ -105,12 +105,12 @@ export const userCredentialsTemplate = (credentials: UserCredentials): TDocument
       //       },
       //     ],
       //   },
-      {
-        text: 'Declaro haber recibido mi cuenta de acceso y acepto las condiciones de uso.',
-        fontSize: 11,
-        marginTop: 20,
-      },
-      { text: '(Registro digital) - No requiere firma manuscrita', fontSize: 11 },
+      // {
+      //   text: 'Declaro haber recibido mi cuenta de acceso y acepto las condiciones de uso.',
+      //   fontSize: 11,
+      //   marginTop: 20,
+      // },
+      // { text: '(Registro digital) - No requiere firma manuscrita', fontSize: 11 },
     ],
   };
 

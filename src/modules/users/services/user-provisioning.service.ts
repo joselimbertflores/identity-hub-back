@@ -51,7 +51,6 @@ export class UserProvisioningService {
   }
 
   async resetTemporaryCredentials(id: string) {
-    console.log(id);
     const { user, password } = await this.usersService.resetTemporaryPassword(id);
 
     const pdfContent = userCredentialsTemplate({
@@ -64,7 +63,7 @@ export class UserProvisioningService {
 
     return {
       credentialsPdfBase64: pdfBuffer.toString('base64'),
-      message: 'Credentials resetted successfully',
+      message: 'Credentials reset successfully',
     };
   }
 }
