@@ -1,4 +1,4 @@
-import { Column, Entity, OneToMany, CreateDateColumn, PrimaryGeneratedColumn, BeforeInsert } from 'typeorm';
+import { Column, Entity, OneToMany, CreateDateColumn, PrimaryGeneratedColumn, BeforeInsert, BeforeUpdate } from 'typeorm';
 import { UserApplication } from './user-application.entity';
 
 @Entity('applications')
@@ -30,9 +30,6 @@ export class Application {
   @Column('text', { array: true })
   redirectUris: string[];
 
-  @Column({ nullable: true })
-  clientProfile: string;
-
   @Column({ default: true })
   isActive: boolean;
 
@@ -42,8 +39,10 @@ export class Application {
   @CreateDateColumn()
   createdAt: Date;
 
+  
   @BeforeInsert()
-  generateClientId() {
+  @BeforeUpdate()
+  normalizeClientId() {
     this.clientId = this.clientId
       .toLowerCase()
       .trim()

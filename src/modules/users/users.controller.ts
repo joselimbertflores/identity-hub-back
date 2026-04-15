@@ -2,7 +2,7 @@ import { Get, Query, Controller, Post, Body, Param, Patch } from '@nestjs/common
 
 import { RequiredRole } from '../auth/decorators';
 import { PaginationParamsDto } from '../common';
-import { UsersService } from './users.service';
+import { UsersService } from './services/users.service';
 
 import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from '../access/dtos';
 import { UserProvisioningService } from './services';

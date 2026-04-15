@@ -3,7 +3,7 @@ import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
-import { UsersService } from 'src/modules/users/users.service';
+import { UsersService } from 'src/modules/users/services/users.service';
 import { UpdateUserProfileDto } from 'src/modules/users/dtos';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto } from '../dtos';
@@ -19,7 +19,6 @@ export class AuthController {
   @AllowPasswordChange()
   @Get('status')
   checkAuthStatus(@GetAuthUser() user: AuthUser) {
-    console.log("CHECK AUTH STATUS");
     return { user };
   }
 

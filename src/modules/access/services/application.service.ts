@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { ILike, Repository } from 'typeorm';
@@ -17,16 +17,11 @@ export class ApplicationService {
   ) {}
 
   async create(clientDto: CreateApplicationDto) {
-    try {
-      const rawSecret = randomBytes(32).toString('hex');
-      console.log(rawSecret);
-      const hashedSecret = await bcrypt.hash(rawSecret, 10);
-      const client = this.clientRepository.create({ ...clientDto, clientSecret: hashedSecret });
-      return await this.clientRepository.save(client);
-    } catch (error: unknown) {
-      console.log(error);
-      throw new InternalServerErrorException(`Client creation failed`);
-    }
+    const rawSecret = randomBytes(32).toString('hex');
+    const hashedSecret = await bcrypt.hash(rawSecret, 10);
+    const model = this.clientRepository.create({ ...clientDto, clientSecret: hashedSecret });
+    const application = await this.clientRepository.save(model);
+    return { application, secret: rawSecret };
   }
 
   async update(id: number, clientDto: UpdateClientDto) {

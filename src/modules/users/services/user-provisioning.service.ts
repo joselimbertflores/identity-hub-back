@@ -6,7 +6,7 @@ import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from 'src/modules/ac
 import { userCredentialsTemplate } from '../templates/credentials.template';
 import { PrinterService } from 'src/modules/printer/printer.service';
 import { AccessService } from 'src/modules/access/services';
-import { UsersService } from '../users.service';
+import { UsersService } from './users.service';
 
 @Injectable()
 export class UserProvisioningService {
@@ -27,8 +27,8 @@ export class UserProvisioningService {
 
     const pdfContent = userCredentialsTemplate({
       fullName: result.user.fullName,
-      password: result.password,
       login: result.user.login,
+      password: result.password,
     });
 
     const user = await this.usersService.findOneWithApplications(result.user.id);

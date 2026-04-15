@@ -6,9 +6,9 @@ import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
 
-import { CreateUserDto, UpdateUserDto, UpdateUserProfileDto } from './dtos';
-import { PaginationParamsDto } from '../common';
-import { User } from './entities';
+import { CreateUserDto, UpdateUserDto, UpdateUserProfileDto } from '../dtos';
+import { PaginationParamsDto } from '../../common';
+import { User } from '../entities';
 
 @Injectable()
 export class UsersService {
