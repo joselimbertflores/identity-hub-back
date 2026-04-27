@@ -176,7 +176,7 @@ export class OAuthService {
       sub: user.id,
       externalKey: user.externalKey,
       name: user.fullName,
-      userType: app.clientProfile,
+      // userType: app.clientProfile,
       clientId: context.clientId,
       scope: context.scope,
     });
@@ -194,7 +194,7 @@ export class OAuthService {
     return await this.tokenService.generateTokenPair({
       sub: user.id,
       name: user.fullName,
-      userType: app.clientProfile,
+      // userType: app.clientProfile,
       externalKey: user.externalKey,
       clientId: data.clientId,
       scope: data.scope,
