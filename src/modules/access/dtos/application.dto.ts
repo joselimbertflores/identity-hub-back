@@ -1,9 +1,10 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class CreateApplicationDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   clientId: string;
 
   @IsString()
@@ -14,27 +15,24 @@ export class CreateApplicationDto {
   @IsOptional()
   description?: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @IsUrl({ require_tld: false })
   launchUrl: string;
 
   @IsString()
   @IsOptional()
   color?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  clientProfile: string;
-
   @IsBoolean()
-  isConfidential: boolean;
+  @IsOptional()
+  isConfidential?: boolean;
 
   @IsString({ each: true })
   @IsArray()
   redirectUris: string[];
 
   @IsBoolean()
-  isActive: boolean;
+  @IsOptional()
+  isActive?: boolean;
 }
 
-export class UpdateClientDto extends PartialType(CreateApplicationDto) {}
+export class UpdateClientDto extends PartialType(OmitType(CreateApplicationDto, ['clientId'])) {}

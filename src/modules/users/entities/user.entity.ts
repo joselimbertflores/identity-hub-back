@@ -1,5 +1,13 @@
-import { UserApplication } from 'src/modules/access/entities';
-import { Column, Entity, OneToMany, UpdateDateColumn, CreateDateColumn, PrimaryGeneratedColumn } from 'typeorm';
+import { Application } from 'src/modules/access/entities';
+import {
+  Column,
+  Entity,
+  JoinTable,
+  ManyToMany,
+  UpdateDateColumn,
+  CreateDateColumn,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 export enum UserRole {
   USER = 'USER',
@@ -49,6 +57,18 @@ export class User {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @OneToMany(() => UserApplication, (userApplication) => userApplication.user)
-  userApplications: UserApplication[];
+  // @JoinTable() va en el lado desde donde normalmente “administras” la relación.
+  @ManyToMany(() => Application, (application) => application.users)
+  @JoinTable({
+    name: 'user_applications',
+    joinColumn: {
+      name: 'user_id',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'application_id',
+      referencedColumnName: 'id',
+    },
+  })
+  applications: Application[];
 }

@@ -22,11 +22,12 @@ export class UsersService {
       ...(term && {
         where: { fullName: ILike(`%${term}%`) },
       }),
-      relations: { userApplications: true },
+      relations: { applications: true },
       order: {
         createdAt: 'DESC',
       },
     });
+    console.log(users);
     return { users, total };
   }
 
@@ -73,9 +74,7 @@ export class UsersService {
   }
 
   async findByExternalKey(id: string) {
-    return this.userRepository.findOne({
-      where: { externalKey: id },
-    });
+    return this.userRepository.findOne({ where: { externalKey: id } });
   }
 
   async updateUserProfile(id: string, dto: UpdateUserProfileDto) {
@@ -126,11 +125,7 @@ export class UsersService {
     const repository = manager ? manager.getRepository(User) : this.userRepository;
     const user = await repository.findOne({
       where: { id },
-      relations: {
-        userApplications: {
-          application: true,
-        },
-      },
+      relations: { applications: true },
     });
 
     if (!user) {

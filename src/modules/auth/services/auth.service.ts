@@ -7,7 +7,6 @@ import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 
 import { AuthException, AuthErrorCode } from '../exceptions/auth.exception';
-import { UserApplication } from 'src/modules/access/entities';
 import { AuthSessionPayload, AuthUser } from '../interfaces';
 import { User } from 'src/modules/users/entities';
 import { TokenService } from './token.service';
@@ -17,7 +16,6 @@ export class AuthService {
   constructor(
     @InjectRedis() private readonly redis: Redis,
     @InjectRepository(User) private userRepository: Repository<User>,
-    @InjectRepository(UserApplication) private userAppRepository: Repository<UserApplication>,
     private tokenService: TokenService,
   ) {}
 
@@ -116,10 +114,17 @@ export class AuthService {
     };
   }
 
-  async checkUserAppAccess(userId: string, applicationId: number) {
-    const hasAccess = await this.userAppRepository.findOne({
-      where: { user: { id: userId, isActive: true }, applicationId },
-    });
-    return hasAccess ? true : false;
+  async checkUserAppAccess(userId: string, applicationId: number): Promise<boolean> {
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .innerJoin('user.applications', 'application')
+      .where('user.id = :userId', { userId })
+      .andWhere('user.isActive = true')
+      .andWhere('application.id = :applicationId', { applicationId })
+      .andWhere('application.isActive = true')
+      .select('user.id')
+      .getOne();
+
+    return !!user;
   }
 }

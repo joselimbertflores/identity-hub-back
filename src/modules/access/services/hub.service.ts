@@ -10,7 +10,7 @@ export class HubService {
 
   async getUserApplications(userId: string) {
     return await this.appResository.find({
-      where: { userApplications: { user: { id: userId } } },
+      where: { users: { id: userId } },
       select: ['name', 'description', 'launchUrl', 'color'],
     });
   }

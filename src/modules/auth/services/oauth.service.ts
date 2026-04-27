@@ -70,6 +70,7 @@ export class OAuthService {
       // No tiene acceso devolver al cliente para que maneje su vista de error
       const url = new URL(params.redirectUri);
       url.searchParams.set('error', 'access_denied');
+      url.searchParams.set('error_description', 'El usuario no tiene acceso a esta aplicación');
       url.searchParams.set('client_name', app.name);
       if (params.state) url.searchParams.set('state', params.state);
       return url.toString();
@@ -107,7 +108,7 @@ export class OAuthService {
   async handleTokenRequest(dto: TokenRequestDto) {
     const app = await this.loadValidApplication(dto.clientId, dto.clientSecret);
     return dto.grantType === GrantType.AUTHORIZATION_CODE
-      ? this.handleAuthorizationCodeGrant(dto, app)
+      ? this.handleAuthorizationCodeGrant(dto)
       : this.handleRefreshTokenGrant(dto, app);
   }
 
@@ -156,7 +157,7 @@ export class OAuthService {
     return url.toString();
   }
 
-  private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
+  private async handleAuthorizationCodeGrant(dto: TokenRequestDto) {
     const key = `auth_code:${dto.code}`;
     const raw = await this.redis.get(key);
 
@@ -171,12 +172,10 @@ export class OAuthService {
     await this.redis.del(key);
 
     const user = await this.checkValidUser(context.userId);
-    console.log('CALL - exchange code');
     return await this.tokenService.generateTokenPair({
       sub: user.id,
       externalKey: user.externalKey,
       name: user.fullName,
-      // userType: app.clientProfile,
       clientId: context.clientId,
       scope: context.scope,
     });
@@ -242,7 +241,7 @@ export class OAuthService {
 
     if (app.isConfidential) {
       if (!clientSecret) throw new UnauthorizedException('Client secret is required.');
-      const isSecretValid = await compare(clientSecret, app.clientSecret);
+      const isSecretValid = await compare(clientSecret, app.clientSecretHash);
       if (!isSecretValid) {
         throw new UnauthorizedException('Invalid client secret.');
       }

@@ -2,8 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { ILike, Repository } from 'typeorm';
-import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import * as bcrypt from 'bcrypt';
 
 import { PaginationParamsDto } from 'src/modules/common';
 import { CreateApplicationDto, UpdateClientDto } from '../dtos';
@@ -13,23 +13,27 @@ import { Application } from '../entities';
 export class ApplicationService {
   constructor(
     @InjectRepository(Application)
-    private clientRepository: Repository<Application>,
+    private applicationRepository: Repository<Application>,
   ) {}
 
   async create(clientDto: CreateApplicationDto) {
-    const rawSecret = randomBytes(32).toString('hex');
-    const hashedSecret = await bcrypt.hash(rawSecret, 10);
-    const model = this.clientRepository.create({ ...clientDto, clientSecret: hashedSecret });
-    const application = await this.clientRepository.save(model);
-    return { application, secret: rawSecret };
+    const clientSecret = this.generateClientSecret();
+
+    const clientSecretHash = await this.hashClientSecret(clientSecret);
+
+    const model = this.applicationRepository.create({ ...clientDto, clientSecretHash });
+
+    const application = await this.applicationRepository.save(model);
+
+    return { application, clientSecret };
   }
 
   async update(id: number, clientDto: UpdateClientDto) {
-    const clientDB = await this.clientRepository.findOneBy({ id });
+    const clientDB = await this.applicationRepository.findOneBy({ id });
 
     if (!clientDB) throw new NotFoundException(`Client ${id} not found`);
 
-    return await this.clientRepository.save({
+    return await this.applicationRepository.save({
       ...clientDB,
       ...clientDto,
     });
@@ -37,7 +41,7 @@ export class ApplicationService {
 
   async findAll(paginationDto: PaginationParamsDto) {
     const { limit, offset, term } = paginationDto;
-    const [clients, total] = await this.clientRepository.findAndCount({
+    const [clients, total] = await this.applicationRepository.findAndCount({
       take: limit,
       skip: offset,
       ...(term && {
@@ -51,9 +55,31 @@ export class ApplicationService {
   }
 
   async getAllActive() {
-    const result = await this.clientRepository.find({
+    const result = await this.applicationRepository.find({
       where: { isActive: true },
     });
     return result;
+  }
+
+  async regenerateSecret(id: number) {
+    const application = await this.applicationRepository.findOne({ where: { id } });
+
+    if (!application) throw new NotFoundException('Application not found');
+
+    const clientSecret = this.generateClientSecret();
+
+    application.clientSecretHash = await this.hashClientSecret(clientSecret);
+
+    await this.applicationRepository.save(application);
+
+    return { clientSecret };
+  }
+
+  private generateClientSecret(): string {
+    return `idh_sk_${randomBytes(32).toString('hex')}`;
+  }
+
+  private async hashClientSecret(clientSecret: string): Promise<string> {
+    return bcrypt.hash(clientSecret, 10);
   }
 }

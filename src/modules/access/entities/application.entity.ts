@@ -1,28 +1,36 @@
-import { Column, Entity, OneToMany, CreateDateColumn, PrimaryGeneratedColumn, BeforeInsert, BeforeUpdate } from 'typeorm';
-import { UserApplication } from './user-application.entity';
+import {
+  Column,
+  Entity,
+  ManyToMany,
+  BeforeInsert,
+  CreateDateColumn,
+  UpdateDateColumn,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+import { User } from 'src/modules/users/entities';
 
 @Entity('applications')
 export class Application {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ unique: true })
+  @Column({ unique: true, length: 100 })
   clientId: string;
 
   @Column({ length: 150 })
   name: string;
 
-  @Column({ nullable: true })
+  @Column('text', { nullable: true })
   description?: string;
 
   @Column()
   launchUrl: string;
 
-  @Column({ length: 9, nullable: true })
+  @Column({ length: 7, nullable: true })
   color: string;
 
   @Column()
-  clientSecret: string;
+  clientSecretHash: string;
 
   @Column({ default: true })
   isConfidential: boolean;
@@ -33,15 +41,16 @@ export class Application {
   @Column({ default: true })
   isActive: boolean;
 
-  @OneToMany(() => UserApplication, (userApplication) => userApplication.application)
-  userApplications: UserApplication[];
+  @ManyToMany(() => User, (user) => user.applications)
+  users: User[];
 
   @CreateDateColumn()
   createdAt: Date;
 
-  
+  @UpdateDateColumn()
+  updatedAt: Date;
+
   @BeforeInsert()
-  @BeforeUpdate()
   normalizeClientId() {
     this.clientId = this.clientId
       .toLowerCase()
