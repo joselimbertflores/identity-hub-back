@@ -34,8 +34,11 @@ export class AccessService {
 
     const currentIds = currentApplications.map((app) => app.id);
 
+    console.log(currentIds);
+
     const idsToAdd = uniqueIds.filter((id) => !currentIds.includes(id));
     const idsToRemove = currentIds.filter((id) => !uniqueIds.includes(id));
+    console.log(idsToRemove);
 
     if (idsToAdd.length === 0 && idsToRemove.length === 0) {
       return;

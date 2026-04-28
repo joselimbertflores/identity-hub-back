@@ -54,11 +54,11 @@ export class ApplicationService {
     return { clients, total };
   }
 
-  async getAllActive() {
-    const result = await this.applicationRepository.find({
+  async findOptions() {
+    return await this.applicationRepository.find({
       where: { isActive: true },
+      select: { id: true, name: true, description: true },
     });
-    return result;
   }
 
   async regenerateSecret(id: number) {

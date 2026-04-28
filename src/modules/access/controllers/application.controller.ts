@@ -8,7 +8,7 @@ import { ApplicationService } from '../services';
 
 @RequiredRole(UserRole.ADMIN)
 @Controller('applications')
-export class ClientController {
+export class ApplicationController {
   constructor(private readonly applicationService: ApplicationService) {}
 
   @Post()
@@ -31,8 +31,8 @@ export class ClientController {
     return this.applicationService.regenerateSecret(id);
   }
 
-  @Get('active')
-  getApplications() {
-    return this.applicationService.getAllActive();
+  @Get('options')
+  findOptions() {
+    return this.applicationService.findOptions();
   }
 }

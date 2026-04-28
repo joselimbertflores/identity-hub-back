@@ -35,5 +35,4 @@ export class UsersController {
   resetCredentials(@Param('id') id: string) {
     return this.userProvisioningService.resetTemporaryCredentials(id);
   }
-  
 }

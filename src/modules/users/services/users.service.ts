@@ -27,7 +27,6 @@ export class UsersService {
         createdAt: 'DESC',
       },
     });
-    console.log(users);
     return { users, total };
   }
 
