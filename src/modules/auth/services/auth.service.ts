@@ -115,16 +115,13 @@ export class AuthService {
   }
 
   async checkUserAppAccess(userId: string, applicationId: number): Promise<boolean> {
-    const user = await this.userRepository
+    return await this.userRepository
       .createQueryBuilder('user')
       .innerJoin('user.applications', 'application')
       .where('user.id = :userId', { userId })
       .andWhere('user.isActive = true')
       .andWhere('application.id = :applicationId', { applicationId })
       .andWhere('application.isActive = true')
-      .select('user.id')
-      .getOne();
-
-    return !!user;
+      .getExists();
   }
 }

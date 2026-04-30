@@ -18,7 +18,10 @@ export class TokenService {
     const REFRESH_TTL_SECONDS = 10 * 60 * 60;
 
     // TTL 15min
-    const accessToken = await this.jwtService.signAsync(payload, { expiresIn: ACCESS_TTL_SECONDS });
+    const accessToken = await this.jwtService.signAsync(payload, {
+      expiresIn: ACCESS_TTL_SECONDS,
+      audience: payload.clientId,
+    });
 
     const refreshToken = crypto.randomUUID();
 
@@ -42,15 +45,14 @@ export class TokenService {
 
   async consumeRefreshToken(refreshToken: string) {
     const key = `refresh:${refreshToken}`;
-    const raw = await this.redis.get(key);
+    const raw = await this.redis.getdel(key);
 
     if (!raw) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException('Invalid or expired refresh token.');
     }
 
     const data = JSON.parse(raw) as RefreshTokenPayload;
 
-    await this.redis.del(key);
     await this.redis.srem(`user_refresh_tokens:${data.userId}`, refreshToken);
 
     return data;

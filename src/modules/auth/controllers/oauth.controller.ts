@@ -6,10 +6,15 @@ import { LoginDto, LoginParamsDto, TokenRequestDto, AuthorizeParamsDto } from '.
 import { AuthException } from '../exceptions/auth.exception';
 import { Cookies, Public } from '../decorators';
 import { OAuthService } from '../services';
+import { ConfigService } from '@nestjs/config';
+import { EnvironmentVariables } from 'src/config';
 
 @Controller('oauth')
 export class OAuthController {
-  constructor(private readonly oAuthService: OAuthService) {}
+  constructor(
+    private readonly oAuthService: OAuthService,
+    private readonly configService: ConfigService<EnvironmentVariables>,
+  ) {}
 
   /**
    * OAuth Authorization Endpoint
@@ -43,13 +48,15 @@ export class OAuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const url = await this.oAuthService.handleAuthorizeRequest(query, sessionId);
-     // Siempre redirige al siguiente paso del flujo OAuth
+    // Siempre redirige al siguiente paso del flujo OAuth
     return res.redirect(url);
   }
 
   @Public()
   @Post('login')
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
+    const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE') === 'true';
+
     try {
       const sessionId = await this.oAuthService.handleLoginRequest(body);
 
@@ -57,12 +64,11 @@ export class OAuthController {
       res.cookie('session_id', sessionId, {
         httpOnly: true,
         sameSite: 'lax',
-        secure: false,
+        secure: cookieSecure,
         maxAge: 10 * 60 * 60 * 1000,
       });
 
       const redirectUrl = await this.oAuthService.resumeAuthorizeFlow(queryParams);
-      console.log(redirectUrl);
       return res.redirect(redirectUrl);
     } catch (error: unknown) {
       if (error instanceof AuthException) {

@@ -42,7 +42,7 @@ export class UserProvisioningService {
     const { applicationIds, ...userDto } = dto;
     const user = await this.dataSource.transaction(async (manager) => {
       const user = await this.usersService.update(id, userDto, manager);
-      if (applicationIds) {
+      if (applicationIds !== undefined) {
         await this.accessService.syncApplications(user.id, applicationIds, manager);
       }
       return this.usersService.findOneWithApplications(user.id, manager);

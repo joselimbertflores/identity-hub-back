@@ -33,7 +33,6 @@ import { PasswordChangeGuard } from './guards';
       signOptions: {
         algorithm: 'RS256',
         issuer: 'identity-hub',
-        audience: 'sso-clients',
         keyid: 'main-key',
       },
     }),

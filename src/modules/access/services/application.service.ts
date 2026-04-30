@@ -25,6 +25,8 @@ export class ApplicationService {
 
     const application = await this.applicationRepository.save(model);
 
+    delete (application as Partial<Application>).clientSecretHash;
+
     return { application, clientSecret };
   }
 

@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsNumber, IsString, validateSync } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsString, validateSync } from 'class-validator';
 
 export class EnvironmentVariables {
   @IsNumber()
@@ -38,7 +38,13 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  JWT_PRIVATE_KEY_PATH:string;
+  JWT_PRIVATE_KEY_PATH: string;
+
+  @IsBoolean()
+  IDENTITY_COOKIE_SECURE: boolean;
+
+  @IsIn(['development', 'production'])
+  NODE_ENV: 'development' | 'production';
 }
 
 export function validate(config: Record<string, unknown>) {

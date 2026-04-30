@@ -29,7 +29,7 @@ export class Application {
   @Column({ length: 7, nullable: true })
   color: string;
 
-  @Column()
+  @Column({ select: false })
   clientSecretHash: string;
 
   @Column({ default: true })

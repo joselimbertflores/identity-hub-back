@@ -21,16 +21,20 @@ import { PrinterModule } from './modules/printer/printer.module';
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService<EnvironmentVariables>) => ({
-        type: 'postgres',
-        host: configService.get('DATABASE_HOST'),
-        port: +configService.get('DATABASE_PORT'),
-        database: configService.get('DATABASE_NAME'),
-        username: configService.get('DATABASE_USER'),
-        password: configService.get('DATABASE_PASSWORD'),
-        autoLoadEntities: true,
-        synchronize: true,
-      }),
+      useFactory: (configService: ConfigService<EnvironmentVariables>) => {
+        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+
+        return {
+          type: 'postgres',
+          host: configService.get('DATABASE_HOST'),
+          port: +configService.get('DATABASE_PORT'),
+          database: configService.get('DATABASE_NAME'),
+          username: configService.get('DATABASE_USER'),
+          password: configService.get('DATABASE_PASSWORD'),
+          autoLoadEntities: true,
+          synchronize: !isProduction,
+        };
+      },
       inject: [ConfigService],
     }),
     CacheModule.register({ isGlobal: true }),

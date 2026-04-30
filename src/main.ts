@@ -1,7 +1,9 @@
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+
 import cookieParser from 'cookie-parser';
+
+import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -12,18 +14,13 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  app.enableCors({
-    // Permitir acceso desde el frontend de Angular (4200)
-    origin: 'http://localhost:4200',
 
-    // VITAL: Si el frontend usa withCredentials, este backend DEBE responder con 'true'
-    credentials: true,
-
-    // Permitir los métodos necesarios (POST, GET, etc.)
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    // ... otros headers si son necesarios
-  });
   app.use(cookieParser());
+
+  if (process.env.NODE_ENV !== 'production') {
+    app.enableCors({ origin: 'http://localhost:4200', credentials: true });
+  }
+
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();

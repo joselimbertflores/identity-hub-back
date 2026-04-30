@@ -23,6 +23,13 @@ export class UsersService {
         where: { fullName: ILike(`%${term}%`) },
       }),
       relations: { applications: true },
+      select: {
+        applications: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      },
       order: {
         createdAt: 'DESC',
       },
@@ -125,6 +132,9 @@ export class UsersService {
     const user = await repository.findOne({
       where: { id },
       relations: { applications: true },
+      select: {
+        applications: { id: true, name: true, description: true },
+      },
     });
 
     if (!user) {

@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import type { Response } from 'express';
 
 import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
 import { UsersService } from 'src/modules/users/services/users.service';
 import { UpdateUserProfileDto } from 'src/modules/users/dtos';
+import { EnvironmentVariables } from 'src/config';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto } from '../dtos';
 import { AuthService } from '../services';
@@ -14,6 +16,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private userService: UsersService,
+    private configService: ConfigService<EnvironmentVariables>,
   ) {}
 
   @AllowPasswordChange()
@@ -25,11 +28,12 @@ export class AuthController {
   @Public()
   @Post('logout')
   async logout(@Cookies('session_id') sessionId: string | undefined, @Res({ passthrough: true }) response: Response) {
+    const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE') === 'true';
     const result = await this.authService.removeAuthSession(sessionId);
     response.clearCookie('session_id', {
       httpOnly: true,
       sameSite: 'lax',
-      secure: false,
+      secure: cookieSecure,
     });
     return result;
   }

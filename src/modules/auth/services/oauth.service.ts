@@ -108,7 +108,7 @@ export class OAuthService {
   async handleTokenRequest(dto: TokenRequestDto) {
     const app = await this.loadValidApplication(dto.clientId, dto.clientSecret);
     return dto.grantType === GrantType.AUTHORIZATION_CODE
-      ? this.handleAuthorizationCodeGrant(dto)
+      ? this.handleAuthorizationCodeGrant(dto, app)
       : this.handleRefreshTokenGrant(dto, app);
   }
 
@@ -157,9 +157,10 @@ export class OAuthService {
     return url.toString();
   }
 
-  private async handleAuthorizationCodeGrant(dto: TokenRequestDto) {
+  private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
     const key = `auth_code:${dto.code}`;
-    const raw = await this.redis.get(key);
+
+    const raw = await this.redis.getdel(key);
 
     if (!raw) throw new UnauthorizedException('Invalid or expired code.');
 
@@ -169,7 +170,10 @@ export class OAuthService {
       throw new UnauthorizedException('Invalid client.');
     }
 
-    await this.redis.del(key);
+    const hasAccess = await this.authService.checkUserAppAccess(context.userId, app.id);
+    if (!hasAccess) {
+      throw new UnauthorizedException('User no longer has access to this application.');
+    }
 
     const user = await this.checkValidUser(context.userId);
     return await this.tokenService.generateTokenPair({
@@ -189,11 +193,16 @@ export class OAuthService {
     }
 
     const user = await this.checkValidUser(data.userId);
-    console.log('CALL - refresh token');
+
+    const hasAccess = await this.authService.checkUserAppAccess(data.userId, app.id);
+
+    if (!hasAccess) {
+      throw new UnauthorizedException('User no longer has access to this application.');
+    }
+
     return await this.tokenService.generateTokenPair({
       sub: user.id,
       name: user.fullName,
-      // userType: app.clientProfile,
       externalKey: user.externalKey,
       clientId: data.clientId,
       scope: data.scope,
@@ -228,7 +237,12 @@ export class OAuthService {
 
   private async checkValidUser(id: string) {
     const user = await this.userRepository.findOne({ where: { id, isActive: true } });
+
     if (!user) {
+      throw new UnauthorizedException('User not authorized.');
+    }
+
+    if (!user.isActive) {
       await this.tokenService.revokeAllForUser(id);
       throw new UnauthorizedException('User not authorized.');
     }
@@ -236,7 +250,13 @@ export class OAuthService {
   }
 
   private async loadValidApplication(clientId: string, clientSecret?: string) {
-    const app = await this.appRepository.findOne({ where: { clientId, isActive: true } });
+    const app = await this.appRepository
+      .createQueryBuilder('app')
+      .addSelect('app.clientSecretHash')
+      .where('app.clientId = :clientId', { clientId })
+      .andWhere('app.isActive = true')
+      .getOne();
+
     if (!app) throw new UnauthorizedException('Invalid client id.');
 
     if (app.isConfidential) {
