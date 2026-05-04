@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
 
-import { CreateUserDto, UpdateUserDto, UpdateUserProfileDto } from '../dtos';
+import { CreateUserDto, UpdateUserDto } from '../dtos';
 import { PaginationParamsDto } from '../../common';
 import { User } from '../entities';
 
@@ -81,17 +81,6 @@ export class UsersService {
 
   async findByExternalKey(id: string) {
     return this.userRepository.findOne({ where: { externalKey: id } });
-  }
-
-  async updateUserProfile(id: string, dto: UpdateUserProfileDto) {
-    const userDB = await this.userRepository.findOne({ where: { id } });
-    if (!userDB) throw new BadRequestException('User not fount');
-    const passwordHash = await this.encryptPassword(dto.password);
-    return await this.userRepository.save({
-      ...userDB,
-      password: passwordHash,
-      mustChangePassword: false,
-    });
   }
 
   async resetTemporaryPassword(id: string) {

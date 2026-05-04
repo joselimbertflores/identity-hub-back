@@ -1,2 +1,2 @@
 export * from './application.controller';
-export * from './hub.controller';
+export * from './access-portal.controller';

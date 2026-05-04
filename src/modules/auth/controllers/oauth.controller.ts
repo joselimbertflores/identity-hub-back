@@ -55,7 +55,7 @@ export class OAuthController {
   @Public()
   @Post('login')
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
-    const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE') === 'true';
+    const secure = this.configService.get<boolean>('IDENTITY_COOKIE_SECURE') ?? false;
 
     try {
       const sessionId = await this.oAuthService.handleLoginRequest(body);
@@ -64,7 +64,7 @@ export class OAuthController {
       res.cookie('session_id', sessionId, {
         httpOnly: true,
         sameSite: 'lax',
-        secure: cookieSecure,
+        secure: secure,
         maxAge: 10 * 60 * 60 * 1000,
       });
 

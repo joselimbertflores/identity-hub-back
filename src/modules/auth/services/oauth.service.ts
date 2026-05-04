@@ -290,9 +290,8 @@ export class OAuthService {
 
   private async consumePendingOAuthRequest(oAuthRequestId: string) {
     const key = `pending_oauth:${oAuthRequestId}`;
-    const data = await this.redis.get(key);
+    const data = await this.redis.getdel(key);
     if (!data) return null;
-    await this.redis.del(key);
     return JSON.parse(data) as AuthorizeParamsDto;
   }
 }

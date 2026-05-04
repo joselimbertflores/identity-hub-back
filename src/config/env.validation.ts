@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsString, validateSync } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, validateSync } from 'class-validator';
 
 export class EnvironmentVariables {
   @IsNumber()
@@ -45,6 +45,10 @@ export class EnvironmentVariables {
 
   @IsIn(['development', 'production'])
   NODE_ENV: 'development' | 'production';
+
+  @IsOptional()
+  @IsString()
+  CORS_ORIGIN?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
-import { ILike, Repository } from 'typeorm';
+import { ILike, QueryFailedError, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
@@ -11,23 +11,28 @@ import { Application } from '../entities';
 
 @Injectable()
 export class ApplicationService {
-  constructor(
-    @InjectRepository(Application)
-    private applicationRepository: Repository<Application>,
-  ) {}
+  constructor(@InjectRepository(Application) private applicationRepository: Repository<Application>) {}
 
   async create(clientDto: CreateApplicationDto) {
     const clientSecret = this.generateClientSecret();
-
     const clientSecretHash = await this.hashClientSecret(clientSecret);
 
-    const model = this.applicationRepository.create({ ...clientDto, clientSecretHash });
+    const model = this.applicationRepository.create({
+      ...clientDto,
+      clientSecretHash,
+    });
 
-    const application = await this.applicationRepository.save(model);
+    try {
+      const application = await this.applicationRepository.save(model);
+      delete (application as Partial<Application>).clientSecretHash;
 
-    delete (application as Partial<Application>).clientSecretHash;
-
-    return { application, clientSecret };
+      return { application, clientSecret };
+    } catch (error: unknown) {
+      if (error instanceof QueryFailedError && (error.driverError as object)['code'] === '23505') {
+        throw new ConflictException('clientId already exists');
+      }
+      throw new InternalServerErrorException('Could not create application');
+    }
   }
 
   async update(id: number, clientDto: UpdateClientDto) {

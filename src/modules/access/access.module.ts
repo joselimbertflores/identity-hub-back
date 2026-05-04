@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { ApplicationController, HubController } from './controllers';
-import { AccessService, ApplicationService, HubService } from './services';
+import { ApplicationController, AccessPortalController } from './controllers';
+import { UserApplicationsService, ApplicationService, AccessPortalService } from './services';
 import { Application } from './entities';
 
 @Module({
-  controllers: [ApplicationController, HubController],
-  providers: [ApplicationService, AccessService, HubService],
+  controllers: [ApplicationController, AccessPortalController],
+  providers: [ApplicationService, UserApplicationsService, AccessPortalService],
   imports: [TypeOrmModule.forFeature([Application])],
-  exports: [TypeOrmModule, AccessService],
+  exports: [TypeOrmModule, UserApplicationsService],
 })
 export class AccessModule {}

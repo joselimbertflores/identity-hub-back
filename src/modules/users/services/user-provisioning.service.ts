@@ -5,7 +5,7 @@ import { DataSource } from 'typeorm';
 import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from 'src/modules/access/dtos';
 import { userCredentialsTemplate } from '../templates/credentials.template';
 import { PrinterService } from 'src/modules/printer/printer.service';
-import { AccessService } from 'src/modules/access/services';
+import { UserApplicationsService } from 'src/modules/access/services';
 import { UsersService } from './users.service';
 
 @Injectable()
@@ -14,14 +14,14 @@ export class UserProvisioningService {
     private dataSource: DataSource,
     private printer: PrinterService,
     private usersService: UsersService,
-    private accessService: AccessService,
+    private userApplicationsService: UserApplicationsService,
   ) {}
 
   async provisionUserWithApplications(dto: CreateUserWithAccessDto) {
     const { applicationIds, ...userDto } = dto;
     const result = await this.dataSource.transaction(async (manager) => {
       const data = await this.usersService.create(userDto, manager);
-      await this.accessService.syncApplications(data.user.id, applicationIds, manager);
+      await this.userApplicationsService.syncApplications(data.user.id, applicationIds, manager);
       return data;
     });
 
@@ -43,7 +43,7 @@ export class UserProvisioningService {
     const user = await this.dataSource.transaction(async (manager) => {
       const user = await this.usersService.update(id, userDto, manager);
       if (applicationIds !== undefined) {
-        await this.accessService.syncApplications(user.id, applicationIds, manager);
+        await this.userApplicationsService.syncApplications(user.id, applicationIds, manager);
       }
       return this.usersService.findOneWithApplications(user.id, manager);
     });

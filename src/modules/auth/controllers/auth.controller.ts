@@ -5,7 +5,6 @@ import type { Response } from 'express';
 
 import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
 import { UsersService } from 'src/modules/users/services/users.service';
-import { UpdateUserProfileDto } from 'src/modules/users/dtos';
 import { EnvironmentVariables } from 'src/config';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto } from '../dtos';
@@ -42,10 +41,5 @@ export class AuthController {
   @Patch('change-password')
   changePassword(@GetAuthUser('id') userId: string, @Body() body: ChangePasswordDto) {
     return this.userService.changePassword(userId, body.password);
-  }
-
-  @Patch('profile')
-  updateUserProfile(@GetAuthUser('id') userId: string, @Body() body: UpdateUserProfileDto) {
-    return this.userService.updateUserProfile(userId, body);
   }
 }

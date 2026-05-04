@@ -6,7 +6,7 @@ import { User } from 'src/modules/users/entities';
 import { Application } from '../entities';
 
 @Injectable()
-export class AccessService {
+export class UserApplicationsService {
   constructor() {}
 
   async syncApplications(userId: string, applicationIds: number[], manager: EntityManager): Promise<void> {

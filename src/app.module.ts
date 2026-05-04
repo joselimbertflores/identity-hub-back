@@ -7,11 +7,11 @@ import { Module } from '@nestjs/common';
 
 import { join } from 'path';
 
+import { PrinterModule } from './modules/printer/printer.module';
 import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EnvironmentVariables, validate } from './config';
-import { PrinterModule } from './modules/printer/printer.module';
 
 @Module({
   imports: [
@@ -49,6 +49,7 @@ import { PrinterModule } from './modules/printer/printer.module';
 
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
+      exclude: ['/api/(.*)', '/oauth/(.*)', '/.well-known/(.*)'],
     }),
     AuthModule,
     UsersModule,

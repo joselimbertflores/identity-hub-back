@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { Application } from '../entities';
 
 @Injectable()
-export class HubService {
+export class AccessPortalService {
   constructor(@InjectRepository(Application) private appResository: Repository<Application>) {}
 
   async getUserApplications(userId: string) {

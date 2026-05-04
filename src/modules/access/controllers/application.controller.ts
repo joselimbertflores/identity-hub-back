@@ -22,7 +22,7 @@ export class ApplicationController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateClientDto: UpdateClientDto) {
+  update(@Param('id', ParseIntPipe) id: string, @Body() updateClientDto: UpdateClientDto) {
     return this.applicationService.update(+id, updateClientDto);
   }
 

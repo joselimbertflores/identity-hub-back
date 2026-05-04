@@ -1,3 +1,3 @@
 export * from './application.service';
-export * from './access.service';
-export * from './hub.service';
+export * from './user-applications.service';
+export * from './access-portal.service';

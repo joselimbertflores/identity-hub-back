@@ -1,10 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const keysPath = path.join(process.cwd(), 'keys');
-
-function readKey(filename: string): string {
-  const fullPath = path.join(keysPath, filename);
+function readKey(keyPath: string): string {
+  const fullPath = path.join(process.cwd(), keyPath);
 
   if (!fs.existsSync(fullPath)) {
     throw new Error(`JWT key not found: ${fullPath}`);
@@ -13,5 +11,6 @@ function readKey(filename: string): string {
   return fs.readFileSync(fullPath, 'utf8');
 }
 
-export const jwtPrivateKey = readKey('private.pem');
-export const jwtPublicKey = readKey('public.pem');
+export const jwtPrivateKey = readKey(process.env.JWT_PRIVATE_KEY_PATH ?? 'keys/private.pem');
+
+export const jwtPublicKey = readKey(process.env.JWT_PUBLIC_KEY_PATH ?? 'keys/public.pem');
