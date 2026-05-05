@@ -46,10 +46,9 @@ import { EnvironmentVariables, validate } from './config';
       }),
       inject: [ConfigService],
     }),
-
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
-      exclude: ['/api/(.*)', '/oauth/(.*)', '/.well-known/(.*)'],
+      exclude: ['/api/{*path}', '/oauth/{*path}', '/.well-known/{*path}'],
     }),
     AuthModule,
     UsersModule,

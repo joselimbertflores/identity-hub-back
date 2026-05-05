@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import cookieParser from 'cookie-parser';
@@ -9,8 +9,13 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api', {
-    exclude: ['oauth/(.*)', '.well-known/(.*)'],
+    exclude: [
+      { path: 'oauth/{*path}', method: RequestMethod.ALL },
+      { path: '.well-known/{*path}', method: RequestMethod.ALL },
+    ],
   });
+  
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -19,8 +24,6 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-
-  app.use(cookieParser());
 
   if (process.env.NODE_ENV === 'development' && process.env.CORS_ORIGIN) {
     app.enableCors({ origin: process.env.CORS_ORIGIN, credentials: true });
