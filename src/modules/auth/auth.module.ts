@@ -9,6 +9,8 @@ import { UsersModule } from '../users/users.module';
 import { AccessModule } from '../access/access.module';
 import { SessionGuard } from './guards/session.guard';
 import { PasswordChangeGuard } from './guards';
+import { EnvironmentVariables } from 'src/config/env.validation';
+import { ConfigService } from '@nestjs/config';
 
 @Module({
   controllers: [OAuthController, AuthController, JwksController],
@@ -27,13 +29,17 @@ import { PasswordChangeGuard } from './guards';
     },
   ],
   imports: [
-    JwtModule.register({
-      privateKey: jwtPrivateKey,
-      publicKey: jwtPublicKey,
-      signOptions: {
-        algorithm: 'RS256',
-        issuer: 'identity-hub',
-        keyid: 'main-key',
+    JwtModule.registerAsync({
+      useFactory: (configService: ConfigService<EnvironmentVariables>) => {
+        return {
+          privateKey: jwtPrivateKey,
+          publicKey: jwtPublicKey,
+          signOptions: {
+            algorithm: 'RS256',
+            keyid: 'main-key',
+            issuer: configService.getOrThrow<string>('JWT_ISSUER'),
+          },
+        };
       },
     }),
     UsersModule,

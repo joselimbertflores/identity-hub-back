@@ -49,6 +49,10 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   CORS_ORIGIN?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_ISSUER: string;
 }
 
 export function validate(config: Record<string, unknown>) {
