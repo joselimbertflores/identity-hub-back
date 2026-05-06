@@ -25,6 +25,10 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Architecture Notes
+
+- SSO/OAuth2 flow documentation: [docs/architecture/sso-flow.md](docs/architecture/sso-flow.md)
+
 ## Project setup
 
 ```bash

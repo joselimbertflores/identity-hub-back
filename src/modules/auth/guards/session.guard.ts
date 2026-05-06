@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
 import { IS_PUBLIC_KEY } from '../decorators';
+import { SESSION_COOKIE_NAME } from '../constants/session.constants';
 import { AuthService } from '../services';
 
 @Injectable()
@@ -20,7 +21,7 @@ export class SessionGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const sessionId = req.cookies['session_id'] as string | undefined;
+    const sessionId = req.cookies[SESSION_COOKIE_NAME] as string | undefined;
     if (!sessionId) {
       throw new UnauthorizedException('Unauthorized ');
     }

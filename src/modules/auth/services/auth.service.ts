@@ -8,6 +8,7 @@ import Redis from 'ioredis';
 
 import { AuthException, AuthErrorCode } from '../exceptions/auth.exception';
 import { AuthSessionPayload, AuthUser } from '../interfaces';
+import { SESSION_TTL_SECONDS } from '../constants/session.constants';
 import { User } from 'src/modules/users/entities';
 import { TokenService } from './token.service';
 import { LoginDto } from '../dtos';
@@ -68,11 +69,9 @@ export class AuthService {
   }
 
   async createAuthSession(user: User) {
-    // * Central sessionId, logout global
     const sessionId = crypto.randomUUID();
-    const LABORAL_HOURS_SECONDS = 10 * 60 * 60;
     const payload: AuthSessionPayload = { userId: user.id, fullName: user.fullName };
-    await this.redis.set(`session:${sessionId}`, JSON.stringify(payload), 'EX', LABORAL_HOURS_SECONDS);
+    await this.redis.set(`session:${sessionId}`, JSON.stringify(payload), 'EX', SESSION_TTL_SECONDS);
     return sessionId;
   }
 

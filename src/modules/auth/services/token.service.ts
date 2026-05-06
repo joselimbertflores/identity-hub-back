@@ -6,6 +6,9 @@ import Redis from 'ioredis';
 
 import { AccessTokenPayload, RefreshTokenPayload } from '../interfaces';
 
+const ACCESS_TTL_SECONDS = 10 * 60;
+const REFRESH_TTL_SECONDS = 10 * 60 * 60;
+
 @Injectable()
 export class TokenService {
   constructor(
@@ -14,10 +17,6 @@ export class TokenService {
   ) {}
 
   async generateTokenPair(payload: AccessTokenPayload) {
-    const ACCESS_TTL_SECONDS = 10 * 60;
-    const REFRESH_TTL_SECONDS = 10 * 60 * 60;
-
-    // TTL 15min
     const accessToken = await this.jwtService.signAsync(payload, {
       expiresIn: ACCESS_TTL_SECONDS,
       audience: payload.clientId,
@@ -31,6 +30,7 @@ export class TokenService {
       scope: payload.scope,
     };
 
+    // Stored server-side and consumed with GETDEL to enforce one-time use.
     await this.redis.set(`refresh:${refreshToken}`, JSON.stringify(data), 'EX', REFRESH_TTL_SECONDS);
     await this.redis.sadd(`user_refresh_tokens:${payload.sub}`, refreshToken);
 
@@ -61,8 +61,6 @@ export class TokenService {
   async revokeAllForUser(userId: string) {
     const setKey = `user_refresh_tokens:${userId}`;
     const tokens = await this.redis.smembers(setKey);
-
-    // if (tokens.length === 0) return;
 
     const pipeline = this.redis.pipeline();
 

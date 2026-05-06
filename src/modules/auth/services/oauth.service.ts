@@ -18,6 +18,11 @@ import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
 
+const AUTH_CODE_KEY_PREFIX = 'auth_code:';
+const PENDING_AUTH_REQUEST_KEY_PREFIX = 'pending_oauth:';
+const AUTH_CODE_TTL_SECONDS = 5 * 60;
+const PENDING_AUTH_REQUEST_TTL_SECONDS = 5 * 60;
+
 @Injectable()
 export class OAuthService {
   constructor(
@@ -29,71 +34,37 @@ export class OAuthService {
     private authService: AuthService,
   ) {}
 
-  /**
-   * Maneja la lógica del endpoint /oauth/authorize.
-   *
-   * Responsabilidades:
-   *
-   * 1. Validar cliente (client_id)
-   * 2. Validar redirect_uri
-   * 3. Verificar sesión del usuario en Identity Hub
-   * 4. Si no hay sesión → redirigir a login
-   * 5. Si hay sesión → verificar acceso del usuario a la aplicación
-   * 6. Generar authorization code
-   * 7. Redirigir al cliente con code + state
-   */
   async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined) {
     const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
-    if (!app) throw new UnauthorizedException('Invalid client.');
+    if (!app) {
+      // We cannot redirect to a client callback until client_id is validated.
+      return this.resolveIdentityHubErrorRedirect('invalid_client');
+    }
 
-    // * Solo redirigir al redirect_uri del cliente si el client_id existe y el redirect_uri fue validado.
-    // * Por esto se arroja error que no redirige
-    if (!app.redirectUris.includes(params.redirectUri)) throw new UnauthorizedException('Invalid redirect uri.');
+    if (!app.redirectUris.includes(params.redirectUri)) {
+      // Never redirect to an unregistered redirect_uri.
+      return this.resolveIdentityHubErrorRedirect('invalid_redirect_uri');
+    }
 
     const session = sessionId ? await this.authService.getAuthSession(sessionId) : null;
-    /**
-     * Si el usuario no tiene sesión:
-     * guardamos el request OAuth temporalmente en Redis
-     * y redirigimos al login del Identity Hub.
-     */
     if (!session) {
-      const oAuthRequestId = await this.createPendingOAuthRequest(params);
+      const authRequestId = await this.createPendingAuthRequest(params);
       const loginUrl = new URL(this.configService.getOrThrow('IDENTITY_HUB_LOGIN_PATH'));
-      // auth_request_id permite reanudar el flujo después del login
-      loginUrl.searchParams.set('auth_request_id', oAuthRequestId);
+      loginUrl.searchParams.set('auth_request_id', authRequestId);
       return loginUrl.toString();
     }
 
-    /**
-     * 4. El usuario ya tiene sesión en Identity Hub
-     * verificamos que tenga acceso a la aplicación solicitada.
-     */
     const hasAccess = await this.authService.checkUserAppAccess(session.userId, app.id);
     if (!hasAccess) {
-      // No tiene acceso devolver al cliente para que maneje su vista de error
       const url = new URL(params.redirectUri);
       url.searchParams.set('error', 'access_denied');
       if (params.state) url.searchParams.set('state', params.state);
       return url.toString();
     }
 
-    /**
-     * Generar authorization code
-     *
-     * Este code se almacenará temporalmente en Redis
-     * y será intercambiado posteriormente en /oauth/token.
-     */
     const code = await this.createAuthCode(session.userId, params);
-
     const resultUrl = new URL(params.redirectUri);
-
-    // El cliente recibirá este code para intercambiarlo por tokens
     resultUrl.searchParams.set('code', code);
-
-    /**
-     * El parámetro state es devuelto intacto al cliente.
-     * El cliente debe validar que coincida con el enviado originalmente.
-     */
     if (params.state) {
       resultUrl.searchParams.set('state', params.state);
     }
@@ -101,8 +72,8 @@ export class OAuthService {
   }
 
   async handleLoginRequest(dto: LoginDto) {
-    const user = await this.authService.authenticateUser(dto); // Login user;
-    return await this.authService.createAuthSession(user); // Create session and returbn key;
+    const user = await this.authService.authenticateUser(dto);
+    return await this.authService.createAuthSession(user);
   }
 
   async handleTokenRequest(dto: TokenRequestDto) {
@@ -112,23 +83,12 @@ export class OAuthService {
       : this.handleRefreshTokenGrant(dto, app);
   }
 
-  /**
-   * Reanuda el flujo OAuth después del login.
-   *
-   * Si el login fue iniciado por un cliente OAuth,
-   * existirá auth_request_id y se reconstruirá el
-   * request /oauth/authorize original.
-   *
-   * Si el login fue directo al Identity Hub,
-   * no habrá auth_request_id y el usuario será
-   * redirigido al portal de aplicaciones.
-   */
   async resumeAuthorizeFlow({ authRequestId }: LoginParamsDto) {
-    const loginUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_HOME_PATH');
-    if (!authRequestId) return loginUrl;
+    const homeUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_HOME_PATH');
+    if (!authRequestId) return homeUrl;
 
-    const pendingReq = await this.consumePendingOAuthRequest(authRequestId);
-    if (!pendingReq) return loginUrl;
+    const pendingReq = await this.consumePendingAuthRequest(authRequestId);
+    if (!pendingReq) return homeUrl;
 
     const params = new URLSearchParams({
       client_id: pendingReq.clientId,
@@ -149,7 +109,7 @@ export class OAuthService {
 
   resolveLoginErrorRedirect(error: AuthException, params: LoginParamsDto) {
     const { authRequestId } = params;
-    const url = new URL(this.configService.getOrThrow<string>('IDENTITY_HUB_LOGIN_PATH'));
+    const url = new URL(this.getAuthErrorRedirectBaseUrl());
     url.searchParams.set('error', error.code);
     if (authRequestId) {
       url.searchParams.set('auth_request_id', authRequestId);
@@ -158,7 +118,7 @@ export class OAuthService {
   }
 
   private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
-    const key = `auth_code:${dto.code}`;
+    const key = `${AUTH_CODE_KEY_PREFIX}${dto.code}`;
 
     const raw = await this.redis.getdel(key);
 
@@ -209,20 +169,9 @@ export class OAuthService {
     });
   }
 
-  /**
-   * Genera un Authorization Code OAuth.
-   *
-   * Características:
-   * - uso único
-   * - TTL corto (5 minutos)
-   * - almacenado en Redis
-   *
-   * Este code será intercambiado en /oauth/token
-   * para obtener access_token y refresh_token.
-   */
   private async createAuthCode(userId: string, { clientId, redirectUri, scope }: AuthorizeParamsDto) {
     const code = crypto.randomUUID();
-    const key = `auth_code:${code}`;
+    const key = `${AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthorizationCodePayload = {
       userId,
       clientId,
@@ -230,8 +179,8 @@ export class OAuthService {
       scope,
       createdAt: Date.now(),
     };
-    // Authorization codes viven poco tiempo
-    await this.redis.set(key, JSON.stringify(payload), 'EX', 5 * 60);
+    // One-time short TTL prevents replay attacks.
+    await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
     return code;
   }
 
@@ -239,10 +188,6 @@ export class OAuthService {
     const user = await this.userRepository.findOne({ where: { id, isActive: true } });
 
     if (!user) {
-      throw new UnauthorizedException('User not authorized.');
-    }
-
-    if (!user.isActive) {
       await this.tokenService.revokeAllForUser(id);
       throw new UnauthorizedException('User not authorized.');
     }
@@ -269,27 +214,25 @@ export class OAuthService {
     return app;
   }
 
-  /**
-   * Guarda temporalmente una solicitud OAuth pendiente.
-   *
-   * Esto permite el flujo:
-   *
-   * authorize → login → authorize
-   *
-   * Cuando el usuario hace login, el sistema recupera esta
-   * solicitud para continuar el flujo original.
-   *
-   * TTL corto para evitar reutilización o almacenamiento prolongado.
-   */
-  private async createPendingOAuthRequest(params: AuthorizeParamsDto) {
-    const oAuthRequestId = crypto.randomUUID();
-    const key = `pending_oauth:${oAuthRequestId}`;
-    await this.redis.set(key, JSON.stringify(params), 'EX', 5 * 60);
-    return oAuthRequestId;
+  private resolveIdentityHubErrorRedirect(errorCode: string) {
+    const url = new URL(this.getAuthErrorRedirectBaseUrl());
+    url.searchParams.set('error', errorCode);
+    return url.toString();
   }
 
-  private async consumePendingOAuthRequest(oAuthRequestId: string) {
-    const key = `pending_oauth:${oAuthRequestId}`;
+  private getAuthErrorRedirectBaseUrl() {
+    return this.configService.get<string>('AUTH_ERROR_REDIRECT') ?? this.configService.getOrThrow<string>('IDENTITY_HUB_LOGIN_PATH');
+  }
+
+  private async createPendingAuthRequest(params: AuthorizeParamsDto) {
+    const authRequestId = crypto.randomUUID();
+    const key = `${PENDING_AUTH_REQUEST_KEY_PREFIX}${authRequestId}`;
+    await this.redis.set(key, JSON.stringify(params), 'EX', PENDING_AUTH_REQUEST_TTL_SECONDS);
+    return authRequestId;
+  }
+
+  private async consumePendingAuthRequest(authRequestId: string) {
+    const key = `${PENDING_AUTH_REQUEST_KEY_PREFIX}${authRequestId}`;
     const data = await this.redis.getdel(key);
     if (!data) return null;
     return JSON.parse(data) as AuthorizeParamsDto;

@@ -32,6 +32,10 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   IDENTITY_HUB_LOGIN_PATH: string;
 
+  @IsOptional()
+  @IsString()
+  AUTH_ERROR_REDIRECT?: string;
+
   @IsString()
   @IsNotEmpty()
   JWT_PUBLIC_KEY_PATH: string;
