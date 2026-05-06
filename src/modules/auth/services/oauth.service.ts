@@ -45,6 +45,9 @@ export class OAuthService {
   async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined) {
     const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
     if (!app) throw new UnauthorizedException('Invalid client.');
+
+    // * Solo redirigir al redirect_uri del cliente si el client_id existe y el redirect_uri fue validado.
+    // * Por esto se arroja error que no redirige
     if (!app.redirectUris.includes(params.redirectUri)) throw new UnauthorizedException('Invalid redirect uri.');
 
     const session = sessionId ? await this.authService.getAuthSession(sessionId) : null;
@@ -70,8 +73,6 @@ export class OAuthService {
       // No tiene acceso devolver al cliente para que maneje su vista de error
       const url = new URL(params.redirectUri);
       url.searchParams.set('error', 'access_denied');
-      url.searchParams.set('error_description', 'El usuario no tiene acceso a esta aplicación');
-      url.searchParams.set('client_name', app.name);
       if (params.state) url.searchParams.set('state', params.state);
       return url.toString();
     }
@@ -96,7 +97,6 @@ export class OAuthService {
     if (params.state) {
       resultUrl.searchParams.set('state', params.state);
     }
-
     return resultUrl.toString();
   }
 
@@ -124,7 +124,7 @@ export class OAuthService {
    * redirigido al portal de aplicaciones.
    */
   async resumeAuthorizeFlow({ authRequestId }: LoginParamsDto) {
-    const loginUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_APPS_PATH');
+    const loginUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_HOME_PATH');
     if (!authRequestId) return loginUrl;
 
     const pendingReq = await this.consumePendingOAuthRequest(authRequestId);

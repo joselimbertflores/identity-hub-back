@@ -26,7 +26,7 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  IDENTITY_HUB_APPS_PATH: string;
+  IDENTITY_HUB_HOME_PATH: string;
 
   @IsString()
   @IsNotEmpty()

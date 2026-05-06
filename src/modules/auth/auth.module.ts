@@ -41,6 +41,7 @@ import { ConfigService } from '@nestjs/config';
           },
         };
       },
+      inject: [ConfigService],
     }),
     UsersModule,
     AccessModule,
