@@ -1,19 +1,18 @@
-import { Get, Res, Post, Body, Query, Controller } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 
 import { LoginDto, LoginParamsDto, TokenRequestDto, AuthorizeParamsDto } from '../dtos';
-
 import { AuthException } from '../exceptions/auth.exception';
 import { Cookies, Public } from '../decorators';
 import { OAuthService } from '../services';
-import { ConfigService } from '@nestjs/config';
 import { EnvironmentVariables } from 'src/config';
-import { SESSION_COOKIE_MAX_AGE_MS, SESSION_COOKIE_NAME } from '../constants/session.constants';
+import { buildSessionCookieOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
 
 @Controller('oauth')
 export class OAuthController {
   constructor(
-    private readonly oAuthService: OAuthService,
+    private readonly oauthService: OAuthService,
     private readonly configService: ConfigService<EnvironmentVariables>,
   ) {}
 
@@ -24,7 +23,7 @@ export class OAuthController {
     @Cookies(SESSION_COOKIE_NAME) sessionId: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const url = await this.oAuthService.handleAuthorizeRequest(query, sessionId);
+    const url = await this.oauthService.handleAuthorizeRequest(query, sessionId);
     return res.redirect(url);
   }
 
@@ -34,21 +33,14 @@ export class OAuthController {
     const secure = this.configService.getOrThrow<boolean>('IDENTITY_COOKIE_SECURE');
 
     try {
-      const sessionId = await this.oAuthService.handleLoginRequest(body);
+      const sessionId = await this.oauthService.authenticateAndCreateSession(body);
+      res.cookie(SESSION_COOKIE_NAME, sessionId, buildSessionCookieOptions(secure));
 
-      res.cookie(SESSION_COOKIE_NAME, sessionId, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure,
-        maxAge: SESSION_COOKIE_MAX_AGE_MS,
-        path: '/',
-      });
-
-      const redirectUrl = await this.oAuthService.resumeAuthorizeFlow(queryParams);
+      const redirectUrl = await this.oauthService.resumeAuthorizeFlow(queryParams);
       return res.redirect(redirectUrl);
     } catch (error: unknown) {
       if (error instanceof AuthException) {
-        const redirectUrl = this.oAuthService.resolveLoginErrorRedirect(error, queryParams);
+        const redirectUrl = this.oauthService.buildLoginErrorRedirectUrl(error, queryParams);
         return res.redirect(redirectUrl);
       }
       throw error;
@@ -59,6 +51,6 @@ export class OAuthController {
   @Post('token')
   token(@Body() body: TokenRequestDto) {
     // OAuth token endpoint is machine-to-machine: JSON response, never browser redirects.
-    return this.oAuthService.handleTokenRequest(body);
+    return this.oauthService.handleTokenRequest(body);
   }
 }

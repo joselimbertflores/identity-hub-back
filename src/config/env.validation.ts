@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, validateSync } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, validateSync } from 'class-validator';
 
 export class EnvironmentVariables {
   @IsNumber()
@@ -26,18 +26,6 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  IDENTITY_HUB_HOME_PATH: string;
-
-  @IsString()
-  @IsNotEmpty()
-  IDENTITY_HUB_LOGIN_PATH: string;
-
-  @IsOptional()
-  @IsString()
-  AUTH_ERROR_REDIRECT?: string;
-
-  @IsString()
-  @IsNotEmpty()
   JWT_PUBLIC_KEY_PATH: string;
 
   @IsString()
@@ -51,12 +39,17 @@ export class EnvironmentVariables {
   NODE_ENV: 'development' | 'production';
 
   @IsOptional()
-  @IsString()
+  @IsUrl({ require_tld: false })
   CORS_ORIGIN?: string;
 
   @IsString()
   @IsNotEmpty()
   JWT_ISSUER: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsUrl({ require_tld: false })
+  IDENTITY_HUB_UI_BASE_URL: string;
 }
 
 export function validate(config: Record<string, unknown>) {

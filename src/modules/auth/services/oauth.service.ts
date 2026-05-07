@@ -9,71 +9,71 @@ import Redis from 'ioredis';
 
 import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, LoginDto, GrantType } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
-
 import { Application } from 'src/modules/access/entities';
 import { User } from 'src/modules/users/entities';
-
 import { AuthorizationCodePayload } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
-
-const AUTH_CODE_KEY_PREFIX = 'auth_code:';
-const PENDING_AUTH_REQUEST_KEY_PREFIX = 'pending_oauth:';
-const AUTH_CODE_TTL_SECONDS = 5 * 60;
-const PENDING_AUTH_REQUEST_TTL_SECONDS = 5 * 60;
+import {
+  AUTH_CODE_KEY_PREFIX,
+  AUTH_CODE_TTL_SECONDS,
+  IDENTITY_HUB_UI_PATHS,
+  PENDING_AUTH_REQUEST_KEY_PREFIX,
+  PENDING_AUTH_REQUEST_TTL_SECONDS,
+} from '../constants/oauth.constants';
 
 @Injectable()
 export class OAuthService {
   constructor(
-    @InjectRepository(Application) private appRepository: Repository<Application>,
-    @InjectRepository(User) private userRepository: Repository<User>,
-    @InjectRedis() private redis: Redis,
-    private configService: ConfigService<EnvironmentVariables>,
-    private tokenService: TokenService,
-    private authService: AuthService,
+    @InjectRepository(Application) private readonly appRepository: Repository<Application>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @InjectRedis() private readonly redis: Redis,
+    private readonly configService: ConfigService<EnvironmentVariables>,
+    private readonly tokenService: TokenService,
+    private readonly authService: AuthService,
   ) {}
 
-  async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined) {
+  async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined): Promise<string> {
     const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
     if (!app) {
-      // We cannot redirect to a client callback until client_id is validated.
-      return this.resolveIdentityHubErrorRedirect('invalid_client');
+      return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.ERROR, {
+        error: 'invalid_client',
+      });
     }
 
     if (!app.redirectUris.includes(params.redirectUri)) {
       // Never redirect to an unregistered redirect_uri.
-      return this.resolveIdentityHubErrorRedirect('invalid_redirect_uri');
+      return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.ERROR, {
+        error: 'invalid_redirect_uri',
+      });
     }
 
     const session = sessionId ? await this.authService.getAuthSession(sessionId) : null;
     if (!session) {
       const authRequestId = await this.createPendingAuthRequest(params);
-      const loginUrl = new URL(this.configService.getOrThrow('IDENTITY_HUB_LOGIN_PATH'));
-      loginUrl.searchParams.set('auth_request_id', authRequestId);
-      return loginUrl.toString();
+
+      return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.LOGIN, {
+        auth_request_id: authRequestId,
+      });
     }
 
     const hasAccess = await this.authService.checkUserAppAccess(session.userId, app.id);
     if (!hasAccess) {
-      const url = new URL(params.redirectUri);
-      url.searchParams.set('error', 'access_denied');
-      if (params.state) url.searchParams.set('state', params.state);
-      return url.toString();
+      return this.buildClientRedirectUrl(params.redirectUri, {
+        error: 'access_denied',
+        state: params.state,
+      });
     }
 
     const code = await this.createAuthCode(session.userId, params);
-    const resultUrl = new URL(params.redirectUri);
-    resultUrl.searchParams.set('code', code);
-    if (params.state) {
-      resultUrl.searchParams.set('state', params.state);
-    }
-    return resultUrl.toString();
+
+    return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
   }
 
-  async handleLoginRequest(dto: LoginDto) {
+  async authenticateAndCreateSession(dto: LoginDto): Promise<string> {
     const user = await this.authService.authenticateUser(dto);
-    return await this.authService.createAuthSession(user);
+    return this.authService.createAuthSession(user);
   }
 
   async handleTokenRequest(dto: TokenRequestDto) {
@@ -84,7 +84,8 @@ export class OAuthService {
   }
 
   async resumeAuthorizeFlow({ authRequestId }: LoginParamsDto) {
-    const homeUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_HOME_PATH');
+    const homeUrl = this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.HOME);
+
     if (!authRequestId) return homeUrl;
 
     const pendingReq = await this.consumePendingAuthRequest(authRequestId);
@@ -107,14 +108,11 @@ export class OAuthService {
     return `/oauth/authorize?${params.toString()}`;
   }
 
-  resolveLoginErrorRedirect(error: AuthException, params: LoginParamsDto) {
-    const { authRequestId } = params;
-    const url = new URL(this.getAuthErrorRedirectBaseUrl());
-    url.searchParams.set('error', error.code);
-    if (authRequestId) {
-      url.searchParams.set('auth_request_id', authRequestId);
-    }
-    return url.toString();
+  buildLoginErrorRedirectUrl(error: AuthException, params: LoginParamsDto): string {
+    return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.LOGIN, {
+      error: error.code,
+      auth_request_id: params.authRequestId,
+    });
   }
 
   private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
@@ -135,8 +133,8 @@ export class OAuthService {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    const user = await this.checkValidUser(context.userId);
-    return await this.tokenService.generateTokenPair({
+    const user = await this.loadActiveUserOrRevokeTokens(context.userId);
+    return this.tokenService.generateTokenPair({
       sub: user.id,
       externalKey: user.externalKey,
       name: user.fullName,
@@ -152,7 +150,7 @@ export class OAuthService {
       throw new UnauthorizedException('invalid_client');
     }
 
-    const user = await this.checkValidUser(data.userId);
+    const user = await this.loadActiveUserOrRevokeTokens(data.userId);
 
     const hasAccess = await this.authService.checkUserAppAccess(data.userId, app.id);
 
@@ -160,7 +158,7 @@ export class OAuthService {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    return await this.tokenService.generateTokenPair({
+    return this.tokenService.generateTokenPair({
       sub: user.id,
       name: user.fullName,
       externalKey: user.externalKey,
@@ -179,12 +177,11 @@ export class OAuthService {
       scope,
       createdAt: Date.now(),
     };
-    // One-time short TTL prevents replay attacks.
     await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
     return code;
   }
 
-  private async checkValidUser(id: string) {
+  private async loadActiveUserOrRevokeTokens(id: string): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id, isActive: true } });
 
     if (!user) {
@@ -194,7 +191,7 @@ export class OAuthService {
     return user;
   }
 
-  private async loadValidApplication(clientId: string, clientSecret?: string) {
+  private async loadValidApplication(clientId: string, clientSecret?: string): Promise<Application> {
     const app = await this.appRepository
       .createQueryBuilder('app')
       .addSelect('app.clientSecretHash')
@@ -214,27 +211,40 @@ export class OAuthService {
     return app;
   }
 
-  private resolveIdentityHubErrorRedirect(errorCode: string) {
-    const url = new URL(this.getAuthErrorRedirectBaseUrl());
-    url.searchParams.set('error', errorCode);
-    return url.toString();
-  }
-
-  private getAuthErrorRedirectBaseUrl() {
-    return this.configService.get<string>('AUTH_ERROR_REDIRECT') ?? this.configService.getOrThrow<string>('IDENTITY_HUB_LOGIN_PATH');
-  }
-
-  private async createPendingAuthRequest(params: AuthorizeParamsDto) {
+  private async createPendingAuthRequest(params: AuthorizeParamsDto): Promise<string> {
     const authRequestId = crypto.randomUUID();
     const key = `${PENDING_AUTH_REQUEST_KEY_PREFIX}${authRequestId}`;
     await this.redis.set(key, JSON.stringify(params), 'EX', PENDING_AUTH_REQUEST_TTL_SECONDS);
     return authRequestId;
   }
 
-  private async consumePendingAuthRequest(authRequestId: string) {
+  private async consumePendingAuthRequest(authRequestId: string): Promise<AuthorizeParamsDto | null> {
     const key = `${PENDING_AUTH_REQUEST_KEY_PREFIX}${authRequestId}`;
     const data = await this.redis.getdel(key);
     if (!data) return null;
     return JSON.parse(data) as AuthorizeParamsDto;
+  }
+
+  private buildIdentityHubUiUrl(path: string, params?: Record<string, string | undefined>): string {
+    const baseUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_UI_BASE_URL');
+    const url = new URL(path, baseUrl);
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value) {
+        url.searchParams.set(key, value);
+      }
+    }
+    return url.toString();
+  }
+
+  private buildClientRedirectUrl(redirectUri: string, params?: Record<string, string | undefined>): string {
+    const url = new URL(redirectUri);
+
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value) {
+        url.searchParams.set(key, value);
+      }
+    }
+
+    return url.toString();
   }
 }

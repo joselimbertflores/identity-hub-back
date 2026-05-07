@@ -8,16 +8,17 @@ import Redis from 'ioredis';
 
 import { AuthException, AuthErrorCode } from '../exceptions/auth.exception';
 import { AuthSessionPayload, AuthUser } from '../interfaces';
-import { SESSION_TTL_SECONDS } from '../constants/session.constants';
+import { buildSessionRedisKey, SESSION_TTL_SECONDS } from '../constants/session.constants';
 import { User } from 'src/modules/users/entities';
 import { TokenService } from './token.service';
 import { LoginDto } from '../dtos';
+
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRedis() private readonly redis: Redis,
-    @InjectRepository(User) private userRepository: Repository<User>,
-    private tokenService: TokenService,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    private readonly tokenService: TokenService,
   ) {}
 
   async authenticateUser({ login, password }: LoginDto): Promise<User> {
@@ -44,7 +45,7 @@ export class AuthService {
   }
 
   async validateSession(sessionId: string): Promise<AuthUser> {
-    const payload = await this.redis.get(`session:${sessionId}`);
+    const payload = await this.redis.get(buildSessionRedisKey(sessionId));
     if (!payload) {
       throw new UnauthorizedException('Session not found');
     }
@@ -71,13 +72,12 @@ export class AuthService {
   async createAuthSession(user: User) {
     const sessionId = crypto.randomUUID();
     const payload: AuthSessionPayload = { userId: user.id, fullName: user.fullName };
-    await this.redis.set(`session:${sessionId}`, JSON.stringify(payload), 'EX', SESSION_TTL_SECONDS);
+    await this.redis.set(buildSessionRedisKey(sessionId), JSON.stringify(payload), 'EX', SESSION_TTL_SECONDS);
     return sessionId;
   }
 
   async getAuthSession(sessionId: string) {
-    const key = `session:${sessionId}`;
-    const session = await this.redis.get(key);
+    const session = await this.redis.get(buildSessionRedisKey(sessionId));
     return session ? (JSON.parse(session) as AuthSessionPayload) : null;
   }
 
@@ -90,7 +90,8 @@ export class AuthService {
       };
     }
 
-    const sessionRaw = await this.redis.get(`session:${sessionId}`);
+    const sessionKey = buildSessionRedisKey(sessionId);
+    const sessionRaw = await this.redis.get(sessionKey);
 
     if (!sessionRaw) {
       return {
@@ -101,11 +102,8 @@ export class AuthService {
 
     const session = JSON.parse(sessionRaw) as AuthSessionPayload;
 
-    // revoca refresh tokens
     await this.tokenService.revokeAllForUser(session.userId);
-
-    // eliminar sesión
-    await this.redis.del(`session:${sessionId}`);
+    await this.redis.del(sessionKey);
 
     return {
       ok: true,

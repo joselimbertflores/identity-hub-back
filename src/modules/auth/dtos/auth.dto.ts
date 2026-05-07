@@ -1,5 +1,5 @@
 import { Expose } from 'class-transformer';
-import { Equals, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { Equals, IsNotEmpty, IsOptional, IsString, IsUUID, IsUrl } from 'class-validator';
 
 export class AuthorizeParamsDto {
   @IsString()
@@ -9,13 +9,14 @@ export class AuthorizeParamsDto {
 
   @IsString()
   @IsNotEmpty()
+  @IsUrl({ require_tld: false })
   @Expose({ name: 'redirect_uri' })
   redirectUri: string;
 
   @IsString()
   @Equals('code', { message: 'response type must be "code"' })
   @Expose({ name: 'response_type' })
-  responseType?: string;
+  responseType: string;
 
   @IsString()
   @IsNotEmpty()
@@ -25,18 +26,16 @@ export class AuthorizeParamsDto {
   @IsString()
   @IsNotEmpty()
   @IsOptional()
-  state: string;
+  state?: string;
 }
 export class LoginDto {
+  @IsString()
   @IsNotEmpty()
   login: string;
 
+  @IsString()
   @IsNotEmpty()
   password: string;
-
-  @IsString()
-  @IsOptional()
-  redirectUrl?: string;
 }
 
 export class LoginParamsDto {

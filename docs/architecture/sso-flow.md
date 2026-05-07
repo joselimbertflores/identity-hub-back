@@ -1,149 +1,185 @@
 # Identity Hub SSO Flow
 
-## Objetivo del Identity Hub
-Identity Hub centraliza autenticación y autorización SSO para múltiples aplicaciones cliente usando OAuth2 (`authorization_code` + `refresh_token`), sesión global con cookie HTTP-only y emisión de JWT firmados con RS256.
+## Overview
+Identity Hub actúa como proveedor central de autenticación y autorización para múltiples aplicaciones cliente.
 
-## Componentes involucrados
-- **Identity Hub (NestJS)**: expone `/oauth/authorize`, `/oauth/token`, `/.well-known/jwks.json`, login/logout y validaciones de acceso.
-- **Aplicaciones cliente**: inician autorización OAuth y consumen tokens.
-- **Navegador**: sigue redirects de `/oauth/authorize` y maneja cookie de sesión global.
-- **Redis**: estado temporal y efímero (sesiones, `auth_request_id`, authorization codes, refresh tokens).
-- **PostgreSQL**: datos persistentes (usuarios, apps cliente, `redirectUris`, `clientSecretHash`, relación usuario-app).
-- **JWT RS256**: access tokens firmados con llave privada.
-- **JWKS**: publicación de llave pública para validación de access tokens.
+El diseño actual combina:
+- OAuth2 con `authorization_code` y `refresh_token`
+- sesión global del navegador con cookie HTTP-only
+- access tokens JWT firmados con RS256
+- JWKS público para validación externa
+- Redis para estado efímero del flujo
 
-## Rutas involucradas
-- `GET /oauth/authorize`
-- `POST /oauth/login`
-- `POST /oauth/token`
-- `GET /.well-known/jwks.json`
-- `POST /auth/logout`
-- `GET /auth/status`
+Este documento explica el recorrido completo del usuario, qué hace cada endpoint y cuál es el siguiente paso esperado en cada etapa.
 
-## Cookies involucradas
-- `session_id`:
-  - `httpOnly: true`
-  - `sameSite: lax`
-  - `secure: IDENTITY_COOKIE_SECURE`
-  - `path: /`
-  - TTL: 10 horas
+## Componentes y responsabilidades
+| Componente | Responsabilidad principal |
+| --- | --- |
+| Identity Hub API | Validar clientes OAuth, autenticar usuarios, emitir codes/tokens, publicar JWKS y administrar sesión global |
+| Identity Hub UI | Mostrar login, home y error propios del Hub |
+| Aplicación cliente | Iniciar `authorize`, intercambiar code por tokens y consumir access tokens |
+| Navegador | Seguir redirects de `/oauth/authorize` y transportar la cookie `session_id` |
+| Redis | Guardar sesión, `auth_request_id`, authorization codes y refresh tokens |
+| PostgreSQL | Persistir usuarios, apps cliente, `redirectUris` y asignación usuario-app |
 
-## Variables de entorno importantes
-- `IDENTITY_HUB_HOME_PATH`: destino post-login cuando no hay OAuth pendiente.
-- `IDENTITY_HUB_LOGIN_PATH`: pantalla/ruta de login del Identity Hub.
-- `AUTH_ERROR_REDIRECT` (opcional): destino para errores de authorize/login mostrados por Identity Hub.
-- `IDENTITY_COOKIE_SECURE`: `true/false` para cookie de sesión.
-- `JWT_ISSUER`: `iss` de los access tokens.
-- `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`: llaves RSA.
-- `REDIS_URL`: almacenamiento temporal OAuth/Sesión.
+## Rutas relevantes
+### Backend
+| Ruta | Método | Tipo | Propósito | Siguiente paso típico |
+| --- | --- | --- | --- | --- |
+| `/oauth/authorize` | `GET` | Navegador | Iniciar o continuar autorización OAuth | Redirect a login, error UI o callback cliente |
+| `/oauth/login` | `POST` | Navegador/UI | Autenticar usuario y crear sesión global | Redirect a `/home/welcome` o reanudación de `authorize` |
+| `/oauth/token` | `POST` | Backend-to-backend | Intercambiar code o refresh token por nuevos tokens | Respuesta JSON |
+| `/.well-known/jwks.json` | `GET` | Público | Exponer llave pública para validar JWT | Consumo por clientes/servicios |
+| `/auth/logout` | `POST` | UI/API | Cerrar sesión global y revocar refresh tokens del usuario | Sesión invalidada |
+| `/auth/status` | `GET` | API protegida | Devolver usuario autenticado actual | Uso por UI |
+| `/auth/change-password` | `PATCH` | API protegida | Permitir cambio de contraseña | Usuario actualizado |
 
-## Flujo 1: Usuario entra directamente al Identity Hub
-1. Navegador entra a la UI del Identity Hub.
-2. Usuario autentica credenciales contra `POST /oauth/login` (sin `auth_request_id`).
-3. Identity Hub crea sesión global en Redis (`session:{uuid}`) y setea `session_id`.
-4. Identity Hub redirige a `IDENTITY_HUB_HOME_PATH`.
+### UI derivada
+Estas rutas no se configuran por variable individual. Se resuelven internamente a partir de `IDENTITY_HUB_UI_BASE_URL`.
 
-## Flujo 2: Usuario entra desde app cliente
-1. App cliente redirige al navegador a `GET /oauth/authorize?...`.
-2. Identity Hub valida `client_id`, `redirect_uri`, `response_type`.
-3. Si existe sesión global válida, continúa el authorize.
-4. Si no existe sesión, pasa al flujo 3.
+| Ruta UI | Uso |
+| --- | --- |
+| `/login` | Pantalla de autenticación y errores de login |
+| `/home/welcome` | Destino por defecto después de login directo |
+| `/auth/error` | Vista propia del Hub para errores tempranos de `/oauth/authorize` |
 
-## Flujo 3: `/oauth/authorize` sin sesión global
-1. Identity Hub persiste request OAuth temporal en Redis:
-   - key: `pending_oauth:{auth_request_id}`
-   - TTL: 5 minutos
-2. Identity Hub redirige a `IDENTITY_HUB_LOGIN_PATH?auth_request_id=...`.
+## Infraestructura HTTP
+| Tema | Comportamiento actual |
+| --- | --- |
+| `setGlobalPrefix('api')` | Aplica a la API general |
+| Exclusiones del prefijo | `/oauth/*` y `/.well-known/*` quedan públicos y estables |
+| `ServeStaticModule` | Sirve Angular en producción desde `public/` |
+| Exclusiones de `ServeStaticModule` | `/api/*`, `/oauth/*` y `/.well-known/*` |
 
-## Flujo 4: Reanudación de authorize tras login
-1. Usuario completa login en `POST /oauth/login?auth_request_id=...`.
-2. Identity Hub crea cookie `session_id`.
-3. Identity Hub consume `pending_oauth:{auth_request_id}` con operación de un solo uso (`GETDEL`).
-4. Si existe, redirige internamente a `/oauth/authorize` con parámetros originales.
-5. Si no existe/expiró, redirige a `IDENTITY_HUB_HOME_PATH`.
+## Cookie de sesión global
+| Propiedad | Valor |
+| --- | --- |
+| Nombre | `session_id` |
+| `httpOnly` | `true` |
+| `sameSite` | `lax` |
+| `secure` | `IDENTITY_COOKIE_SECURE` |
+| `path` | `/` |
+| TTL | 10 horas |
 
-## Flujo 5: Authorization code exitoso
-1. En `/oauth/authorize`, Identity Hub valida acceso usuario-app activa.
-2. Si tiene acceso, genera `authorization code` aleatorio.
-3. Guarda en Redis:
-   - key: `auth_code:{code}`
-   - TTL: 5 minutos
-   - uso único (se consume con `GETDEL` en `/oauth/token`)
-4. Redirige a `redirect_uri?code=...&state=...`.
+## Estado efímero en Redis
+| Clave | Contenido | TTL | Uso |
+| --- | --- | --- | --- |
+| `session:{sessionId}` | Sesión global del navegador | 10h | Identificar usuario autenticado |
+| `pending_oauth:{authRequestId}` | Request OAuth pendiente | 5 min | Reanudar `authorize` después del login |
+| `auth_code:{code}` | Authorization code | 5 min | Intercambio único por tokens |
+| `refresh:{refreshToken}` | Refresh token rotativo | 10h | Obtener un nuevo par de tokens |
+| `user_refresh_tokens:{userId}` | Índice de refresh tokens del usuario | 10h aprox. | Revocación masiva en logout o bloqueo |
 
-## Flujo 6: Intercambio `code -> tokens`
-1. Cliente llama `POST /oauth/token` con `grant_type=authorization_code`.
-2. Identity Hub valida:
-   - app activa por `client_id`
-   - `client_secret` vs `clientSecretHash` (bcrypt)
-   - code vigente y no reutilizado
-   - coincidencia exacta de `redirect_uri` y `client_id` contra el contexto del code
-   - usuario activo y con acceso vigente
-3. Emite:
-   - `accessToken` (JWT RS256 con `kid`, `iss`, `aud`)
-   - `refreshToken` rotativo de un solo uso
+## Flujo completo
+### Resumen textual
+1. La app cliente o la UI del Hub inicia el flujo.
+2. Si el usuario no tiene sesión global, el backend redirige a login.
+3. Tras login exitoso, el backend crea `session_id` y reanuda el `authorize` pendiente si existe.
+4. Si la app, el `redirect_uri` y el acceso del usuario son válidos, se emite un authorization code.
+5. La app cliente intercambia el code por tokens en `/oauth/token`.
+6. Más adelante puede usar `refresh_token` para rotar el par de tokens.
+7. El logout borra la sesión global y revoca refresh tokens del usuario.
 
-## Flujo 7: Refresh token
-1. Cliente llama `POST /oauth/token` con `grant_type=refresh_token`.
-2. Identity Hub consume `refresh:{token}` con `GETDEL` (no reutilizable).
-3. Revalida app/usuario/acceso.
-4. Emite nuevo par `accessToken` + `refreshToken`.
+### Flujo 1: login directo al Identity Hub
+| Paso | Actor | Acción | Resultado |
+| --- | --- | --- | --- |
+| 1 | Navegador | Entra a la UI del Hub | Ve `/login` o una ruta interna de UI |
+| 2 | UI | Llama `POST /oauth/login` sin `auth_request_id` | El backend valida credenciales |
+| 3 | Backend | Crea `session:{uuid}` y `Set-Cookie: session_id=...` | Se establece sesión global |
+| 4 | Backend | Redirige a `IDENTITY_HUB_UI_BASE_URL/home/welcome` | El usuario queda autenticado dentro del Hub |
 
-## Flujo 8: Logout del Identity Hub
-1. Cliente/UI llama `POST /auth/logout`.
-2. Identity Hub elimina sesión `session:{id}`.
-3. Revoca todos los refresh tokens del usuario (`user_refresh_tokens:{userId}`).
-4. Limpia cookie `session_id`.
+### Flujo 2: login iniciado desde una app cliente
+| Paso | Actor | Acción | Resultado |
+| --- | --- | --- | --- |
+| 1 | App cliente | Redirige a `GET /oauth/authorize` | El navegador llega al Hub |
+| 2 | Backend | Valida `client_id`, `redirect_uri` y `response_type=code` | Determina si puede continuar |
+| 3 | Backend | Si no hay sesión global, guarda `pending_oauth:{authRequestId}` | El contexto queda listo para reanudación |
+| 4 | Backend | Redirige a `/login?auth_request_id=...` | La UI muestra el login del Hub |
 
-## Manejo de errores
+### Flujo 3: reanudación después del login
+| Paso | Actor | Acción | Resultado |
+| --- | --- | --- | --- |
+| 1 | UI | Llama `POST /oauth/login?auth_request_id=...` | El backend autentica al usuario |
+| 2 | Backend | Crea cookie `session_id` | Se establece sesión global |
+| 3 | Backend | Consume `pending_oauth:{authRequestId}` con `GETDEL` | El request pendiente queda invalidado para reuso |
+| 4 | Backend | Redirige internamente a `/oauth/authorize` con los parámetros originales | El flujo OAuth continúa |
+| 5 | Backend | Si el request expiró o ya fue consumido, redirige a `/home/welcome` | El usuario no queda bloqueado |
 
-### Antes de validar `client_id`/`redirect_uri`
-- **No se redirige al `redirect_uri` del cliente** (aún no confiable).
-- Identity Hub redirige a `AUTH_ERROR_REDIRECT` (o `IDENTITY_HUB_LOGIN_PATH`) con `?error=...`.
+### Flujo 4: authorize con sesión global
+| Paso | Validación | Si falla | Si pasa |
+| --- | --- | --- | --- |
+| 1 | Existe `session_id` válido | Login UI | Continúa |
+| 2 | `client_id` corresponde a app activa | Error UI del Hub | Continúa |
+| 3 | `redirect_uri` coincide exactamente con una registrada | Error UI del Hub | Continúa |
+| 4 | Usuario sigue activo y tiene acceso a la app | Redirect al cliente con `access_denied` | Continúa |
+| 5 | Crear `auth_code:{code}` de un solo uso | N/A | Redirect al cliente con `code` y `state` |
 
-### Después de validar `client_id`/`redirect_uri`
-- En `/oauth/authorize`, errores de autorización de negocio (ej. usuario sin acceso) vuelven al cliente:
-  - `redirect_uri?error=access_denied&state=...`
+### Flujo 5: code exchange
+`POST /oauth/token` con `grant_type=authorization_code`.
 
-### Usuario sin acceso a app cliente
-- Respuesta por redirect del navegador hacia `redirect_uri` validado con `error=access_denied`.
+| Validación | Descripción |
+| --- | --- |
+| Cliente | `client_id` existe y la app está activa |
+| Secreto | `client_secret` se exige sólo para clientes confidenciales |
+| Code | Existe, no expiró y no fue reutilizado |
+| Contexto | `client_id` y `redirect_uri` coinciden con lo guardado en el code |
+| Usuario | Sigue activo |
+| Acceso | El usuario todavía tiene acceso a la app |
 
-### Errores en `/oauth/token`
-- Siempre JSON (sin redirects), porque es endpoint server-to-server.
-- Ejemplos: `invalid_client`, `Invalid or expired code`, `Invalid or expired refresh token`.
+Si todo es válido:
+- se firma un `accessToken` RS256
+- se genera un `refreshToken` rotativo
+- la respuesta es JSON
 
-### Errores de sesión/login
-- Login inválido o usuario deshabilitado redirige a pantalla de login/error del Identity Hub con `?error=...`.
-- Sesión ausente en endpoints protegidos: `401` JSON.
+### Flujo 6: refresh token
+`POST /oauth/token` con `grant_type=refresh_token`.
 
-## Qué tipo de error va a cada canal
-- **Vista Identity Hub**: errores previos a callback confiable (cliente/redirect inválidos, login UI).
-- **Redirect a cliente (`?error=...`)**: errores post-validación de `client_id` + `redirect_uri`.
-- **JSON API**: endpoints no browser-flow (`/oauth/token`, endpoints protegidos API).
+| Paso | Acción |
+| --- | --- |
+| 1 | Consumir `refresh:{token}` con `GETDEL` |
+| 2 | Revalidar app activa, secreto si aplica, usuario y acceso |
+| 3 | Emitir un nuevo `accessToken` y un nuevo `refreshToken` |
 
-## Almacenamiento temporal en Redis
-- `session:{sessionId}` (10h)
-- `pending_oauth:{auth_request_id}` (5 min, un solo uso)
-- `auth_code:{code}` (5 min, un solo uso)
-- `refresh:{refreshToken}` (10h, un solo uso)
-- `user_refresh_tokens:{userId}` (índice para revocación global)
+### Flujo 7: logout
+| Paso | Acción |
+| --- | --- |
+| 1 | `POST /auth/logout` |
+| 2 | Eliminar `session:{sessionId}` si existe |
+| 3 | Revocar refresh tokens del usuario vía `user_refresh_tokens:{userId}` |
+| 4 | Limpiar la cookie `session_id` |
 
-## Decisiones de seguridad relevantes
-- `redirect_uri` se valida por coincidencia exacta contra `redirectUris` registradas.
-- Nunca se redirige al cliente si `client_id`/`redirect_uri` no fueron validados.
-- Authorization code y refresh token son de un solo uso (mitiga replay).
-- `/oauth/authorize` usa redirects de navegador (flujo interactivo).
-- `/oauth/token` usa JSON (flujo backend-to-backend).
-- JWKS publica solo llave pública.
-- El contrato de respuesta de tokens es **camelCase** (`accessToken`, `refreshToken`, etc.); no es error si clientes y Hub están alineados.
+## Contratos que conviene preservar
+| Tema | Decisión actual |
+| --- | --- |
+| `authorize` | Usa redirects de navegador |
+| `token` | Responde JSON, no redirects |
+| UI base | Se construye con `IDENTITY_HUB_UI_BASE_URL` |
+| Rutas UI | Son constantes internas |
+| Errores tempranos de `authorize` | Se quedan en la UI del Hub |
+| Errores posteriores a `redirect_uri` validada | Pueden volver al cliente |
+| Errores de login | Se muestran en `/login` |
+| Tokens | Respuesta actual en `camelCase` |
 
-## Naming recomendado
-- Mantener `IDENTITY_HUB_HOME_PATH` y `IDENTITY_HUB_LOGIN_PATH`.
-- Mantener `JWT_ISSUER` (válido para OAuth mientras el `iss` sea estable y documentado).
-- Usar `AUTH_ERROR_REDIRECT` solo para vista de error UI del Hub.
-- Mantener términos de dominio: `authorization code`, `auth_request_id`, `refresh token`, `clientId`, `redirectUris`.
+## RS256 y JWKS
+| Elemento | Uso |
+| --- | --- |
+| `JWT_PRIVATE_KEY_PATH` | Llave privada para firmar access tokens |
+| `JWT_PUBLIC_KEY_PATH` | Llave pública publicada vía JWKS |
+| `JWT_ISSUER` | Valor de `iss` en los access tokens |
+| `aud` | `clientId` del cliente OAuth |
+| `kid` actual | `main-key` |
 
-## Diagrama de secuencia principal
+## Diagrama de secuencia
+El diagrama resume el camino más común cuando una app cliente inicia el flujo y el usuario todavía no tiene sesión global.
+
+Si el visor no renderiza Mermaid, la lectura equivalente es:
+1. La app redirige a `/oauth/authorize`.
+2. El Hub detecta que falta sesión y redirige a `/login`.
+3. El usuario hace login.
+4. El Hub reanuda el `authorize`.
+5. El Hub emite un code y redirige al cliente.
+6. El cliente intercambia el code por tokens en `/oauth/token`.
+
 ```mermaid
 sequenceDiagram
   participant U as Usuario/Navegador
@@ -153,10 +189,10 @@ sequenceDiagram
 
   C->>U: Redirect a /oauth/authorize
   U->>H: GET /oauth/authorize
-  H->>H: valida client_id + redirect_uri
+  H->>H: valida client_id, redirect_uri y response_type
   alt Sin sesión global
     H->>R: SET pending_oauth:{id} EX 300
-    H-->>U: 302 a IDENTITY_HUB_LOGIN_PATH?auth_request_id=id
+    H-->>U: 302 a /login?auth_request_id=id
     U->>H: POST /oauth/login?auth_request_id=id
     H->>R: SET session:{sid} EX 36000
     H-->>U: Set-Cookie session_id

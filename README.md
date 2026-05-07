@@ -27,7 +27,10 @@
 
 ## Architecture Notes
 
-- SSO/OAuth2 flow documentation: [docs/architecture/sso-flow.md](docs/architecture/sso-flow.md)
+- Architecture docs index: [docs/architecture](docs/architecture)
+- SSO/Auth flow: [docs/architecture/sso-flow.md](docs/architecture/sso-flow.md)
+- OAuth error handling: [docs/architecture/oauth-errors.md](docs/architecture/oauth-errors.md)
+- Environment and deployment-facing config: [docs/architecture/environment.md](docs/architecture/environment.md)
 
 ## Project setup
 

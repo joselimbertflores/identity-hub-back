@@ -9,8 +9,8 @@ import { AuthService } from '../services';
 @Injectable()
 export class SessionGuard implements CanActivate {
   constructor(
-    private authService: AuthService,
-    private reflector: Reflector,
+    private readonly authService: AuthService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -23,12 +23,12 @@ export class SessionGuard implements CanActivate {
 
     const sessionId = req.cookies[SESSION_COOKIE_NAME] as string | undefined;
     if (!sessionId) {
-      throw new UnauthorizedException('Unauthorized ');
+      throw new UnauthorizedException('Unauthorized');
     }
     const user = await this.authService.validateSession(sessionId);
 
     req['user'] = user;
-    
+
     return true;
   }
 }
