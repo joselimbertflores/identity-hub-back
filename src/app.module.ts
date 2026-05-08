@@ -47,7 +47,7 @@ import { EnvironmentVariables, validate } from './config';
       inject: [ConfigService],
     }),
     ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'public'),
+      rootPath: join(process.cwd(), 'public', 'browser'),
       exclude: ['/api/{*path}', '/oauth/{*path}', '/.well-known/{*path}'],
     }),
     AuthModule,
