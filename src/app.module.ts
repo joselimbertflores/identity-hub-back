@@ -48,7 +48,7 @@ import { EnvironmentVariables, validate } from './config';
     }),
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'public', 'browser'),
-      exclude: ['/api/{*path}', '/oauth/{*path}', '/.well-known/{*path}'],
+      exclude: ['/api/{*path}', '/oauth/{*path}', '/.well-known/{*path}', '/internal/{*path}'],
     }),
     AuthModule,
     UsersModule,

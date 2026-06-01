@@ -47,9 +47,9 @@ Estas rutas no se configuran por variable individual. Se resuelven internamente 
 | Tema | Comportamiento actual |
 | --- | --- |
 | `setGlobalPrefix('api')` | Aplica a la API general |
-| Exclusiones del prefijo | `/oauth/*` y `/.well-known/*` quedan públicos y estables |
+| Exclusiones del prefijo | `/oauth/*`, `/.well-known/*` y `/internal/*` quedan fuera de `/api`; `/internal/*` exige credenciales de aplicación |
 | `ServeStaticModule` | Sirve Angular en producción desde `public/` |
-| Exclusiones de `ServeStaticModule` | `/api/*`, `/oauth/*` y `/.well-known/*` |
+| Exclusiones de `ServeStaticModule` | `/api/*`, `/oauth/*`, `/.well-known/*` y `/internal/*` |
 
 ## Cookie de sesión global
 | Propiedad | Valor |

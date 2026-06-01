@@ -2,6 +2,7 @@ import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
+import { IS_APPLICATION_CLIENT_AUTH_KEY } from '../../common';
 import { IS_PUBLIC_KEY } from '../decorators';
 import { SESSION_COOKIE_NAME } from '../constants/session.constants';
 import { AuthService } from '../services';
@@ -19,7 +20,11 @@ export class SessionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) return true;
+    const isApplicationClientAuth = this.reflector.getAllAndOverride<boolean>(IS_APPLICATION_CLIENT_AUTH_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic || isApplicationClientAuth) return true;
 
     const sessionId = req.cookies[SESSION_COOKIE_NAME] as string | undefined;
     if (!sessionId) {

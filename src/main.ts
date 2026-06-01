@@ -12,9 +12,10 @@ async function bootstrap() {
     exclude: [
       { path: 'oauth/{*path}', method: RequestMethod.ALL },
       { path: '.well-known/{*path}', method: RequestMethod.ALL },
+      { path: 'internal/{*path}', method: RequestMethod.ALL },
     ],
   });
-  
+
   app.use(cookieParser());
 
   app.useGlobalPipes(
@@ -31,4 +32,4 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();

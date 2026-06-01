@@ -12,8 +12,8 @@ Identity Hub conoce usuarios centrales, aplicaciones cliente y asignaciones usua
 
 | Componente           | Responsabilidad                                                            | No debe hacer                                                                    | Contenido esperado                                                            |
 | -------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `UsersModule`        | Administrar usuarios centrales y sus reglas propias                        | Orquestar asignaciones, documentos o roles internos de clientes                  | Entidad `User`, consultas, CRUD y reglas de credenciales                      |
-| `AccessModule`       | Administrar aplicaciones cliente y asignaciones usuario-aplicación         | Administrar el ciclo de vida del usuario central o sus roles locales en clientes | Aplicaciones, portal de acceso y `UserApplicationsService`                    |
+| `UsersModule`        | Administrar usuarios centrales y su catálogo interno                       | Orquestar documentos o administrar roles internos de clientes                    | Entidad `User`, consultas, CRUD, reglas de credenciales y directorio interno  |
+| `AccessModule`       | Administrar aplicaciones cliente y asignaciones usuario-aplicación         | Administrar el ciclo de vida del usuario central o sus roles locales en clientes | Aplicaciones, portal de acceso, asignaciones y autenticación de clientes      |
 | `ProvisioningModule` | Coordinar casos de uso que cruzan Users, Access y Printer                  | Convertirse en propietario de las reglas internas de esos módulos                | Controller y servicios de orquestación de provisionamiento                    |
 | `AuthModule`         | Autenticar usuarios, administrar sesiones y ejecutar el flujo OAuth actual | Absorber CRUD de usuarios o lógica de provisionamiento                           | Login, logout, cambio de contraseña, tokens, JWKS, guards y controllers OAuth |
 | `PrinterModule`      | Generar documentos PDF a partir de una definición recibida                 | Conocer reglas de usuarios, acceso o autenticación                               | `PrinterService` y configuración de PDF                                       |
@@ -48,3 +48,12 @@ ProvisioningModule
 ├── AccessModule
 └── PrinterModule
 ```
+
+El catálogo interno agrega una dependencia unidireccional adicional:
+
+```text
+UsersModule
+└── AccessModule
+```
+
+`UsersModule` usa la aplicación autenticada para filtrar el directorio. `AccessModule` no importa `UsersModule`, por lo que esta relación no crea una dependencia circular.

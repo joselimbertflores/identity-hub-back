@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
+import { IS_APPLICATION_CLIENT_AUTH_KEY } from '../../common';
 import { ALLOW_PASSWORD_CHANGE_KEY, IS_PUBLIC_KEY } from '../decorators';
 import { AuthUser } from '../interfaces';
 
@@ -10,9 +11,16 @@ export class PasswordChangeGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()]);
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const isApplicationClientAuth = this.reflector.getAllAndOverride<boolean>(IS_APPLICATION_CLIENT_AUTH_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-    if (isPublic) return true;
+    if (isPublic || isApplicationClientAuth) return true;
 
     const allowWhenPasswordChange = this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE_KEY, [
       context.getHandler(),
