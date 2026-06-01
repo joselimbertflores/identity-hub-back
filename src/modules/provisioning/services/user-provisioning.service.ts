@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 
 import { DataSource } from 'typeorm';
 
-import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from 'src/modules/access/dtos';
+import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from '../dtos';
 import { userCredentialsTemplate } from '../templates/credentials.template';
-import { PrinterService } from 'src/modules/printer/printer.service';
-import { UserApplicationsService } from 'src/modules/access/services';
-import { UsersService } from './users.service';
+import { PrinterService } from '../../printer/printer.service';
+import { UserApplicationsService } from '../../access/services';
+import { UsersService } from '../../users/services/users.service';
 
 @Injectable()
 export class UserProvisioningService {

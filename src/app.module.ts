@@ -7,7 +7,7 @@ import { Module } from '@nestjs/common';
 
 import { join } from 'path';
 
-import { PrinterModule } from './modules/printer/printer.module';
+import { ProvisioningModule } from './modules/provisioning/provisioning.module';
 import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -53,7 +53,7 @@ import { EnvironmentVariables, validate } from './config';
     AuthModule,
     UsersModule,
     AccessModule,
-    PrinterModule,
+    ProvisioningModule,
   ],
   controllers: [],
   providers: [],
