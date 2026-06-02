@@ -28,7 +28,7 @@ export class User {
   @Column()
   fullName: string;
 
-  @Column({ unique: true, nullable: true })
+  @Column({ unique: true })
   externalKey: string;
 
   @Column({ nullable: true })

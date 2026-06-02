@@ -28,7 +28,11 @@ export class UsersDirectoryService {
       );
     }
 
-    const users = await queryBuilder.orderBy('user.fullName', 'ASC').addOrderBy('user.id', 'ASC').take(20).getMany();
+    const users = await queryBuilder
+      .orderBy('user.fullName', 'ASC')
+      .addOrderBy('user.externalKey', 'ASC')
+      .take(20)
+      .getMany();
 
     return users.map((user) => this.toResponse(user));
   }
@@ -53,12 +57,13 @@ export class UsersDirectoryService {
       .createQueryBuilder('user')
       .innerJoin('user.applications', 'application', 'application.id = :applicationId', { applicationId })
       .where('user.isActive = true')
-      .select(['user.id', 'user.fullName', 'user.email', 'user.login']);
+      .andWhere('user.externalKey IS NOT NULL')
+      .select(['user.id', 'user.externalKey', 'user.fullName', 'user.email', 'user.login']);
   }
 
   private toResponse(user: User): AssignableUserResponseDto {
     return {
-      id: user.id,
+      externalKey: user.externalKey,
       fullName: user.fullName,
       email: user.email ?? null,
       login: user.login,

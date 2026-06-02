@@ -1,5 +1,5 @@
 export class AssignableUserResponseDto {
-  id: string;
+  externalKey: string;
   fullName: string;
   email: string | null;
   login: string;

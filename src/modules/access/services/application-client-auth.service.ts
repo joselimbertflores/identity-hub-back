@@ -27,6 +27,8 @@ export class ApplicationClientAuthService {
       throw new UnauthorizedException('Invalid client credentials.');
     }
 
+    delete (application as Partial<Application>).clientSecretHash;
+
     return application;
   }
 }
