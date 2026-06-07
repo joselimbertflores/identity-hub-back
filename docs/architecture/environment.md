@@ -109,7 +109,7 @@ Reglas:
 
 ## Aplicaciones cliente
 
-Gaceta, Intranet y otras aplicaciones se registran desde el panel administrativo del Hub.
+Las aplicaciones cliente se registran desde el panel administrativo del Hub.
 
 No se registran desde JSON en `.env`.
 
@@ -188,7 +188,7 @@ En despliegues con multiples instancias se recomienda usar storage compartido o 
 2. Configurar `DB_SYNCHRONIZE=false`.
 3. Ejecutar `npm run migration:run`.
 4. Ejecutar bootstrap manual si no existe admin.
-5. Registrar Gaceta/Intranet desde el panel.
+5. Registrar las aplicaciones cliente desde el panel.
 6. Asignar usuarios de prueba.
 7. Validar flujo SSO completo con navegador.
 8. Validar endpoints internos con Basic Auth.

@@ -60,4 +60,4 @@ No crea aplicaciones cliente, no asigna usuarios y no reemplaza el panel adminis
 
 ## Limites
 
-Identity Hub no administra roles internos de Gaceta o Intranet. Solo decide si el usuario central puede acceder a la aplicacion cliente.
+Identity Hub no administra roles internos de las aplicaciones cliente. Solo decide si el usuario central puede acceder a la aplicacion cliente.

@@ -1,6 +1,6 @@
 # Identity Hub Architecture
 
-Identity Hub es el proveedor interno de autenticacion SSO/OAuth para aplicaciones cliente como Gaceta e Intranet.
+Identity Hub es el proveedor interno de autenticacion SSO/OAuth para aplicaciones cliente. Gaceta e Intranet son ejemplos de clientes que pueden integrarse al Hub.
 
 Su responsabilidad es centralizar:
 
@@ -13,7 +13,7 @@ Su responsabilidad es centralizar:
 - refresh tokens rotativos;
 - endpoints internos para sincronizar usuarios asignados.
 
-Identity Hub no administra roles internos de Gaceta, Intranet u otros sistemas. Cada cliente mantiene sus usuarios shadow, permisos y reglas locales.
+Identity Hub no administra roles internos de las aplicaciones cliente. Cada cliente mantiene sus usuarios shadow, permisos y reglas locales.
 
 ## Documentos
 
@@ -21,6 +21,7 @@ Identity Hub no administra roles internos de Gaceta, Intranet u otros sistemas. 
 | ------------------------------------------------ | ----------------------------------------------------------------------------- |
 | [backend-modules.md](./backend-modules.md)       | Modulos NestJS, responsabilidades y dependencias                              |
 | [sso-flow.md](./sso-flow.md)                     | Flujo completo de login, sesion, OAuth, PKCE, tokens y logout                 |
+| [client-integration.md](./client-integration.md) | Guia practica para integrar clientes OAuth confidenciales                     |
 | [oauth-errors.md](./oauth-errors.md)             | Donde se devuelven errores y por que no se redirige a callbacks no confiables |
 | [client-user-import.md](./client-user-import.md) | Endpoints internos `/internal/*` para clientes                                |
 | [provisioning-flow.md](./provisioning-flow.md)   | Alta administrativa de usuarios, aplicaciones y credenciales temporales       |
@@ -31,9 +32,10 @@ Identity Hub no administra roles internos de Gaceta, Intranet u otros sistemas. 
 
 1. Leer [backend-modules.md](./backend-modules.md) para entender limites de responsabilidad.
 2. Leer [sso-flow.md](./sso-flow.md) antes de integrar un cliente OAuth.
-3. Leer [environment.md](./environment.md) antes de levantar staging o produccion.
-4. Leer [client-user-import.md](./client-user-import.md) si Gaceta/Intranet necesitan importar usuarios asignados.
-5. Leer [testing.md](./testing.md) para saber que esta cubierto y que debe probarse manualmente.
+3. Leer [client-integration.md](./client-integration.md) para implementar el contrato en una aplicacion cliente.
+4. Leer [environment.md](./environment.md) antes de levantar staging o produccion.
+5. Leer [client-user-import.md](./client-user-import.md) si una aplicacion necesita importar usuarios asignados.
+6. Leer [testing.md](./testing.md) para saber que esta cubierto y que debe probarse manualmente.
 
 ## Estado operativo
 

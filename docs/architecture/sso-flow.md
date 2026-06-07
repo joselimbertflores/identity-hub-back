@@ -66,6 +66,8 @@ La comparacion de `redirect_uri` es exacta contra `Application.redirectUris`.
 
 No se normaliza ni se permite coincidencia parcial. Si el callback no esta registrado, el Hub redirige a su propia pantalla de error y nunca a la URL enviada por el cliente.
 
+En intranet se recomienda HTTPS siempre que sea posible. HTTP o IP privada puede usarse dentro de una red institucional si la URI queda registrada exactamente. No usar comodines, prefijos, dominios parciales ni reglas tipo `startsWith`.
+
 ## Sesion global
 
 Cookie:
@@ -115,10 +117,10 @@ Request minimo:
 ```json
 {
   "grant_type": "authorization_code",
-  "client_id": "gaceta",
+  "client_id": "cliente-oauth",
   "client_secret": "idh_sk_...",
   "code": "...",
-  "redirect_uri": "https://gaceta.example.com/auth/callback",
+  "redirect_uri": "https://cliente.example.com/auth/callback",
   "code_verifier": "..."
 }
 ```
@@ -140,7 +142,7 @@ Request minimo:
 ```json
 {
   "grant_type": "refresh_token",
-  "client_id": "gaceta",
+  "client_id": "cliente-oauth",
   "client_secret": "idh_sk_...",
   "refresh_token": "..."
 }
@@ -183,9 +185,9 @@ La llave privada no debe estar en el repositorio. Para rotacion futura se recomi
 
 Despues del logout, un nuevo `/oauth/authorize` debe requerir login nuevamente.
 
-## Contrato minimo para Gaceta/Intranet
+## Contrato minimo para aplicaciones cliente
 
-Cada cliente debe:
+Cada aplicacion cliente debe:
 
 - registrar una o mas `redirectUris` exactas;
 - generar y guardar `state` por intento de login;

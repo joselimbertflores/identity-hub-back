@@ -69,7 +69,7 @@ Para validar una base limpia sin usar bootstrap:
 5. Confirmar que existen `applications`, `user`, `user_applications` y `migrations`.
 6. Eliminar la base temporal.
 
-## Validaciones manuales con Gaceta/Intranet
+## Validaciones manuales con aplicaciones cliente
 
 1. Registrar la aplicacion desde el panel del Hub.
 2. Registrar `redirect_uri` exacta.

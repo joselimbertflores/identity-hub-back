@@ -1,6 +1,6 @@
 # Endpoints internos para clientes
 
-Gaceta, Intranet y otros sistemas pueden consultar usuarios asignados a su aplicacion para crear o actualizar usuarios shadow locales.
+Las aplicaciones cliente pueden consultar usuarios asignados a su aplicacion para crear o actualizar usuarios shadow locales.
 
 Estos endpoints son internos, no forman parte del flujo OAuth del navegador y no usan `session_id`.
 
