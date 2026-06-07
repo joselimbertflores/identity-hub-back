@@ -1,105 +1,116 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Identity Hub Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Identity Hub es el proveedor interno de autenticacion SSO/OAuth para aplicaciones cliente como Gaceta e Intranet.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+El backend autentica usuarios centrales, mantiene una sesion global del navegador, valida acceso a aplicaciones, emite tokens JWT RS256, publica JWKS y expone endpoints internos para que los clientes consulten usuarios asignables.
 
-## Description
+## Requisitos
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- Node.js compatible con NestJS 11
+- npm
+- Docker y Docker Compose para desarrollo local
+- PostgreSQL
+- Redis
+- Llaves RSA para firmar tokens:
+  - `JWT_PRIVATE_KEY_PATH`
+  - `JWT_PUBLIC_KEY_PATH`
 
-## Architecture Notes
+## Configuracion local
 
-- Architecture docs index: [docs/architecture](docs/architecture)
-- SSO/Auth flow: [docs/architecture/sso-flow.md](docs/architecture/sso-flow.md)
-- OAuth error handling: [docs/architecture/oauth-errors.md](docs/architecture/oauth-errors.md)
-- Environment and deployment-facing config: [docs/architecture/environment.md](docs/architecture/environment.md)
+Crear `.env` a partir de `.env.template`.
 
-## Project setup
+Levantar servicios locales:
 
 ```bash
-$ npm install
+docker compose up -d postgres redis
 ```
 
-## Compile and run the project
+El compose local expone:
+
+```env
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=identity_hub
+DATABASE_USER=postgres
+DATABASE_PASSWORD=postgres
+REDIS_URL=redis://localhost:6379
+```
+
+En desarrollo se puede usar:
+
+```env
+DB_SYNCHRONIZE=true
+IDENTITY_COOKIE_SECURE=false
+CORS_ORIGIN=http://localhost:4200
+```
+
+Iniciar el backend:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
+npm run start:dev
 ```
 
-## Run tests
+## Migraciones
+
+`DB_SYNCHRONIZE` controla solo el runtime normal de Nest. El DataSource de TypeORM CLI siempre usa `synchronize: false`.
+
+En produccion:
+
+```env
+DB_SYNCHRONIZE=false
+```
+
+Comandos:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run migration:generate -- src/database/migrations/NombreDeMigracion
+npm run migration:run
+npm run migration:revert
 ```
 
-## Deployment
+La migracion inicial del esquema vive en `src/database/migrations`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Bootstrap inicial
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+El bootstrap crea unicamente el primer usuario `ADMIN` si todavia no existe ningun admin. Es manual e idempotente.
+
+Variables:
+
+```env
+BOOTSTRAP_ADMIN_LOGIN=admin
+BOOTSTRAP_ADMIN_PASSWORD=change-me
+BOOTSTRAP_ADMIN_FULL_NAME=Identity Hub Admin
+```
+
+Ejecutar solo cuando corresponda:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run bootstrap:run
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+El bootstrap no crea aplicaciones cliente. Gaceta, Intranet y otras aplicaciones se registran desde el panel administrativo del Identity Hub.
 
-## Resources
+## Pruebas y build
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+npm run test
+npm run test:e2e
+npm run build
+npx tsc -p tsconfig.json --noEmit
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+`test:e2e` ejecuta la suite de integracion del flujo Identity Hub con repositorios y Redis controlados en memoria. No ejecuta migraciones ni bootstrap.
 
-## Support
+## Documentacion
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+La documentacion principal vive en [docs/architecture](docs/architecture).
 
-## Stay in touch
+Lectura recomendada:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+1. [Overview](docs/architecture/README.md)
+2. [Modulos del backend](docs/architecture/backend-modules.md)
+3. [Flujo SSO/OAuth](docs/architecture/sso-flow.md)
+4. [Entorno y despliegue](docs/architecture/environment.md)
+5. [Catalogo interno de usuarios](docs/architecture/client-user-import.md)
+6. [Pruebas](docs/architecture/testing.md)

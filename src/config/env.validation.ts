@@ -20,6 +20,9 @@ export class EnvironmentVariables {
   @IsString()
   DATABASE_PASSWORD: string;
 
+  @IsIn(['true', 'false'])
+  DB_SYNCHRONIZE: 'true' | 'false';
+
   @IsString()
   @IsNotEmpty()
   REDIS_URL: string;
@@ -34,9 +37,6 @@ export class EnvironmentVariables {
 
   @IsBoolean()
   IDENTITY_COOKIE_SECURE: boolean;
-
-  @IsIn(['development', 'production'])
-  NODE_ENV: 'development' | 'production';
 
   @IsOptional()
   @IsUrl({ require_tld: false })

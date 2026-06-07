@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
-import { AuthService, JwksService, OAuthService, TokenService } from './services';
+import { AuthService, JwksService, OAuthService, PkceService, TokenService } from './services';
 import { OAuthController, AuthController, JwksController } from './controllers';
 import { readJwtKey } from './config/jwt.config';
 import { OAUTH_JWT_KEY_ID } from './constants/oauth.constants';
@@ -20,6 +20,7 @@ import { EnvironmentVariables } from 'src/config/env.validation';
     OAuthService,
     TokenService,
     JwksService,
+    PkceService,
     {
       provide: APP_GUARD,
       useClass: SessionGuard,

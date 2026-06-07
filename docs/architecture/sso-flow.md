@@ -1,212 +1,197 @@
-# Identity Hub SSO Flow
+# Flujo SSO/OAuth
 
-## Overview
-Identity Hub actúa como proveedor central de autenticación y autorización para múltiples aplicaciones cliente.
+Identity Hub usa OAuth 2.0 Authorization Code con PKCE S256 obligatorio. El navegador conserva una sesion global del Hub con cookie HTTP-only y las aplicaciones cliente reciben tokens JWT firmados con RS256.
 
-El diseño actual combina:
-- OAuth2 con `authorization_code` y `refresh_token`
-- sesión global del navegador con cookie HTTP-only
-- access tokens JWT firmados con RS256
-- JWKS público para validación externa
-- Redis para estado efímero del flujo
+## Actores
 
-Este documento explica el recorrido completo del usuario, qué hace cada endpoint y cuál es el siguiente paso esperado en cada etapa.
+| Actor              | Responsabilidad                                                            |
+| ------------------ | -------------------------------------------------------------------------- |
+| Navegador          | Sigue redirects y transporta la cookie `session_id` del Hub                |
+| Identity Hub UI    | Muestra login, home y pantalla de error del Hub                            |
+| Identity Hub API   | Valida clientes, usuarios, acceso, PKCE, emite codes/tokens y publica JWKS |
+| Aplicacion cliente | Inicia `/oauth/authorize`, guarda `state`, genera PKCE y canjea el code    |
+| Redis              | Guarda estado efimero del flujo                                            |
+| PostgreSQL         | Guarda usuarios, aplicaciones y asignaciones                               |
 
-## Componentes y responsabilidades
-| Componente | Responsabilidad principal |
-| --- | --- |
-| Identity Hub API | Validar clientes OAuth, autenticar usuarios, emitir codes/tokens, publicar JWKS y administrar sesión global |
-| Identity Hub UI | Mostrar login, home y error propios del Hub |
-| Aplicación cliente | Iniciar `authorize`, intercambiar code por tokens y consumir access tokens |
-| Navegador | Seguir redirects de `/oauth/authorize` y transportar la cookie `session_id` |
-| Redis | Guardar sesión, `auth_request_id`, authorization codes y refresh tokens |
-| PostgreSQL | Persistir usuarios, apps cliente, `redirectUris` y asignación usuario-app |
+## Endpoints principales
 
-## Rutas relevantes
-### Backend
-| Ruta | Método | Tipo | Propósito | Siguiente paso típico |
-| --- | --- | --- | --- | --- |
-| `/oauth/authorize` | `GET` | Navegador | Iniciar o continuar autorización OAuth | Redirect a login, error UI o callback cliente |
-| `/oauth/login` | `POST` | Navegador/UI | Autenticar usuario y crear sesión global | Redirect a `/home/welcome` o reanudación de `authorize` |
-| `/oauth/token` | `POST` | Backend-to-backend | Intercambiar code o refresh token por nuevos tokens | Respuesta JSON |
-| `/.well-known/jwks.json` | `GET` | Público | Exponer llave pública para validar JWT | Consumo por clientes/servicios |
-| `/auth/logout` | `POST` | UI/API | Cerrar sesión global y revocar refresh tokens del usuario | Sesión invalidada |
-| `/auth/status` | `GET` | API protegida | Devolver usuario autenticado actual | Uso por UI |
-| `/auth/change-password` | `PATCH` | API protegida | Permitir cambio de contraseña | Usuario actualizado |
+| Metodo  | Ruta                     | Uso                                          |
+| ------- | ------------------------ | -------------------------------------------- |
+| `GET`   | `/oauth/authorize`       | Inicio o continuacion del Authorization Code |
+| `POST`  | `/oauth/login`           | Login del usuario en la UI del Hub           |
+| `POST`  | `/oauth/token`           | Canje de authorization code o refresh token  |
+| `POST`  | `/auth/logout`           | Logout global del Hub                        |
+| `GET`   | `/.well-known/jwks.json` | Llaves publicas para validar JWT             |
+| `GET`   | `/auth/status`           | Usuario autenticado actual para la UI        |
+| `PATCH` | `/auth/change-password`  | Cambio de password cuando corresponde        |
 
-### UI derivada
-Estas rutas no se configuran por variable individual. Se resuelven internamente a partir de `IDENTITY_HUB_UI_BASE_URL`.
+`/oauth/*`, `/.well-known/*` y `/internal/*` no usan el prefijo global `/api`.
 
-| Ruta UI | Uso |
-| --- | --- |
-| `/login` | Pantalla de autenticación y errores de login |
-| `/home/welcome` | Destino por defecto después de login directo |
-| `/auth/error` | Vista propia del Hub para errores tempranos de `/oauth/authorize` |
+## Authorize request
 
-## Infraestructura HTTP
-| Tema | Comportamiento actual |
-| --- | --- |
-| `setGlobalPrefix('api')` | Aplica a la API general |
-| Exclusiones del prefijo | `/oauth/*`, `/.well-known/*` y `/internal/*` quedan fuera de `/api`; `/internal/*` exige credenciales de aplicación |
-| `ServeStaticModule` | Sirve Angular en producción desde `public/` |
-| Exclusiones de `ServeStaticModule` | `/api/*`, `/oauth/*`, `/.well-known/*` y `/internal/*` |
+El cliente debe redirigir al navegador a:
 
-## Cookie de sesión global
-| Propiedad | Valor |
-| --- | --- |
-| Nombre | `session_id` |
-| `httpOnly` | `true` |
-| `sameSite` | `lax` |
-| `secure` | `IDENTITY_COOKIE_SECURE` |
-| `path` | `/` |
-| TTL | 10 horas |
+```http
+GET /oauth/authorize?client_id=...&redirect_uri=...&response_type=code&state=...&code_challenge=...&code_challenge_method=S256
+```
 
-## Estado efímero en Redis
-| Clave | Contenido | TTL | Uso |
-| --- | --- | --- | --- |
-| `session:{sessionId}` | Sesión global del navegador | 10h | Identificar usuario autenticado |
-| `pending_oauth:{authRequestId}` | Request OAuth pendiente | 5 min | Reanudar `authorize` después del login |
-| `auth_code:{code}` | Authorization code | 5 min | Intercambio único por tokens |
-| `refresh:{refreshToken}` | Refresh token rotativo | 10h | Obtener un nuevo par de tokens |
-| `user_refresh_tokens:{userId}` | Índice de refresh tokens del usuario | 10h aprox. | Revocación masiva en logout o bloqueo |
+Parametros requeridos:
+
+| Parametro               | Regla                                             |
+| ----------------------- | ------------------------------------------------- |
+| `client_id`             | Debe existir y la aplicacion debe estar activa    |
+| `redirect_uri`          | Debe coincidir exactamente con una URI registrada |
+| `response_type`         | Solo `code`                                       |
+| `state`                 | Obligatorio; se devuelve intacto al cliente       |
+| `code_challenge`        | 43 a 128 caracteres PKCE permitidos               |
+| `code_challenge_method` | Solo `S256`; `plain` se rechaza                   |
+
+`scope` no tiene soporte funcional actual. Si se envia, se rechaza en vez de copiarlo silenciosamente a tokens.
+
+## PKCE S256
+
+El cliente genera:
+
+```text
+code_verifier = string aleatorio seguro
+code_challenge = base64url(sha256(code_verifier))
+code_challenge_method = S256
+```
+
+El Hub guarda `codeChallenge` y `codeChallengeMethod` junto con el authorization code. En `/oauth/token` recalcula `base64url(sha256(code_verifier))` y lo compara contra el valor guardado.
+
+## Redirect URI exacta
+
+La comparacion de `redirect_uri` es exacta contra `Application.redirectUris`.
+
+No se normaliza ni se permite coincidencia parcial. Si el callback no esta registrado, el Hub redirige a su propia pantalla de error y nunca a la URL enviada por el cliente.
+
+## Sesion global
+
+Cookie:
+
+| Propiedad  | Valor                    |
+| ---------- | ------------------------ |
+| Nombre     | `session_id`             |
+| `httpOnly` | `true`                   |
+| `sameSite` | `lax`                    |
+| `secure`   | `IDENTITY_COOKIE_SECURE` |
+| `path`     | `/`                      |
+| TTL        | 10 horas                 |
+
+Si no hay sesion, el Hub crea un request pendiente en Redis y redirige a la UI de login.
+
+## Estado en Redis
+
+| Clave                           | Contenido                                             | TTL   | Consumo                      |
+| ------------------------------- | ----------------------------------------------------- | ----- | ---------------------------- |
+| `session:{sessionId}`           | Usuario autenticado del navegador                     | 10h   | Lectura por sesion           |
+| `pending_oauth:{authRequestId}` | Request authorize pendiente                           | 5 min | `GETDEL` al reanudar login   |
+| `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp | 5 min | `GETDEL` en canje            |
+| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera             | 10h   | `GETDEL` en refresh          |
+| `user_refresh_tokens:{userId}`  | Indice para revocacion global                         | 10h   | `SMEMBERS` y `DEL` en logout |
+
+`GETDEL` evita reuso de requests pendientes, authorization codes y refresh tokens.
 
 ## Flujo completo
-### Resumen textual
-1. La app cliente o la UI del Hub inicia el flujo.
-2. Si el usuario no tiene sesión global, el backend redirige a login.
-3. Tras login exitoso, el backend crea `session_id` y reanuda el `authorize` pendiente si existe.
-4. Si la app, el `redirect_uri` y el acceso del usuario son válidos, se emite un authorization code.
-5. La app cliente intercambia el code por tokens en `/oauth/token`.
-6. Más adelante puede usar `refresh_token` para rotar el par de tokens.
-7. El logout borra la sesión global y revoca refresh tokens del usuario.
 
-### Flujo 1: login directo al Identity Hub
-| Paso | Actor | Acción | Resultado |
-| --- | --- | --- | --- |
-| 1 | Navegador | Entra a la UI del Hub | Ve `/login` o una ruta interna de UI |
-| 2 | UI | Llama `POST /oauth/login` sin `auth_request_id` | El backend valida credenciales |
-| 3 | Backend | Crea `session:{uuid}` y `Set-Cookie: session_id=...` | Se establece sesión global |
-| 4 | Backend | Redirige a `IDENTITY_HUB_UI_BASE_URL/home/welcome` | El usuario queda autenticado dentro del Hub |
+1. La aplicacion cliente genera `state`, `code_verifier` y `code_challenge`.
+2. El cliente redirige a `/oauth/authorize`.
+3. El Hub valida cliente activo, `redirect_uri` exacta, `response_type`, `state` y PKCE.
+4. Si no hay `session_id`, el Hub guarda `pending_oauth:{id}` y redirige a `/login?auth_request_id=id`.
+5. El usuario hace login en `/oauth/login`.
+6. El Hub crea `session_id`, consume el pending OAuth y reanuda `/oauth/authorize`.
+7. El Hub valida usuario activo y asignacion usuario-aplicacion.
+8. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
+9. El backend cliente llama `/oauth/token` con `grant_type=authorization_code`, `client_id`, secreto si aplica, `redirect_uri`, `code` y `code_verifier`.
+10. El Hub consume el code, valida contexto y PKCE, y emite access/refresh tokens.
 
-### Flujo 2: login iniciado desde una app cliente
-| Paso | Actor | Acción | Resultado |
-| --- | --- | --- | --- |
-| 1 | App cliente | Redirige a `GET /oauth/authorize` | El navegador llega al Hub |
-| 2 | Backend | Valida `client_id`, `redirect_uri` y `response_type=code` | Determina si puede continuar |
-| 3 | Backend | Si no hay sesión global, guarda `pending_oauth:{authRequestId}` | El contexto queda listo para reanudación |
-| 4 | Backend | Redirige a `/login?auth_request_id=...` | La UI muestra el login del Hub |
+## Token endpoint
 
-### Flujo 3: reanudación después del login
-| Paso | Actor | Acción | Resultado |
-| --- | --- | --- | --- |
-| 1 | UI | Llama `POST /oauth/login?auth_request_id=...` | El backend autentica al usuario |
-| 2 | Backend | Crea cookie `session_id` | Se establece sesión global |
-| 3 | Backend | Consume `pending_oauth:{authRequestId}` con `GETDEL` | El request pendiente queda invalidado para reuso |
-| 4 | Backend | Redirige internamente a `/oauth/authorize` con los parámetros originales | El flujo OAuth continúa |
-| 5 | Backend | Si el request expiró o ya fue consumido, redirige a `/home/welcome` | El usuario no queda bloqueado |
+### Authorization code
 
-### Flujo 4: authorize con sesión global
-| Paso | Validación | Si falla | Si pasa |
-| --- | --- | --- | --- |
-| 1 | Existe `session_id` válido | Login UI | Continúa |
-| 2 | `client_id` corresponde a app activa | Error UI del Hub | Continúa |
-| 3 | `redirect_uri` coincide exactamente con una registrada | Error UI del Hub | Continúa |
-| 4 | Usuario sigue activo y tiene acceso a la app | Redirect al cliente con `access_denied` | Continúa |
-| 5 | Crear `auth_code:{code}` de un solo uso | N/A | Redirect al cliente con `code` y `state` |
+Request minimo:
 
-### Flujo 5: code exchange
-`POST /oauth/token` con `grant_type=authorization_code`.
-
-| Validación | Descripción |
-| --- | --- |
-| Cliente | `client_id` existe y la app está activa |
-| Secreto | `client_secret` se exige sólo para clientes confidenciales |
-| Code | Existe, no expiró y no fue reutilizado |
-| Contexto | `client_id` y `redirect_uri` coinciden con lo guardado en el code |
-| Usuario | Sigue activo |
-| Acceso | El usuario todavía tiene acceso a la app |
-
-Si todo es válido:
-- se firma un `accessToken` RS256
-- se genera un `refreshToken` rotativo
-- la respuesta es JSON
-
-### Flujo 6: refresh token
-`POST /oauth/token` con `grant_type=refresh_token`.
-
-| Paso | Acción |
-| --- | --- |
-| 1 | Consumir `refresh:{token}` con `GETDEL` |
-| 2 | Revalidar app activa, secreto si aplica, usuario y acceso |
-| 3 | Emitir un nuevo `accessToken` y un nuevo `refreshToken` |
-
-### Flujo 7: logout
-| Paso | Acción |
-| --- | --- |
-| 1 | `POST /auth/logout` |
-| 2 | Eliminar `session:{sessionId}` si existe |
-| 3 | Revocar refresh tokens del usuario vía `user_refresh_tokens:{userId}` |
-| 4 | Limpiar la cookie `session_id` |
-
-## Contratos que conviene preservar
-| Tema | Decisión actual |
-| --- | --- |
-| `authorize` | Usa redirects de navegador |
-| `token` | Responde JSON, no redirects |
-| UI base | Se construye con `IDENTITY_HUB_UI_BASE_URL` |
-| Rutas UI | Son constantes internas |
-| Errores tempranos de `authorize` | Se quedan en la UI del Hub |
-| Errores posteriores a `redirect_uri` validada | Pueden volver al cliente |
-| Errores de login | Se muestran en `/login` |
-| Tokens | Respuesta actual en `camelCase` |
-
-## RS256 y JWKS
-| Elemento | Uso |
-| --- | --- |
-| `JWT_PRIVATE_KEY_PATH` | Llave privada para firmar access tokens |
-| `JWT_PUBLIC_KEY_PATH` | Llave pública publicada vía JWKS |
-| `JWT_ISSUER` | Valor de `iss` en los access tokens |
-| `aud` | `clientId` del cliente OAuth |
-| `kid` actual | `main-key` |
-
-## Diagrama de secuencia
-El diagrama resume el camino más común cuando una app cliente inicia el flujo y el usuario todavía no tiene sesión global.
-
-Si el visor no renderiza Mermaid, la lectura equivalente es:
-1. La app redirige a `/oauth/authorize`.
-2. El Hub detecta que falta sesión y redirige a `/login`.
-3. El usuario hace login.
-4. El Hub reanuda el `authorize`.
-5. El Hub emite un code y redirige al cliente.
-6. El cliente intercambia el code por tokens en `/oauth/token`.
-
-```mermaid
-sequenceDiagram
-  participant U as Usuario/Navegador
-  participant C as App Cliente
-  participant H as Identity Hub
-  participant R as Redis
-
-  C->>U: Redirect a /oauth/authorize
-  U->>H: GET /oauth/authorize
-  H->>H: valida client_id, redirect_uri y response_type
-  alt Sin sesión global
-    H->>R: SET pending_oauth:{id} EX 300
-    H-->>U: 302 a /login?auth_request_id=id
-    U->>H: POST /oauth/login?auth_request_id=id
-    H->>R: SET session:{sid} EX 36000
-    H-->>U: Set-Cookie session_id
-    H->>R: GETDEL pending_oauth:{id}
-    H-->>U: 302 /oauth/authorize?...(reanudado)
-    U->>H: GET /oauth/authorize (reanudado)
-  end
-
-  H->>H: valida acceso usuario-app
-  H->>R: SET auth_code:{code} EX 300
-  H-->>U: 302 redirect_uri?code=...&state=...
-  U->>C: llega con code
-  C->>H: POST /oauth/token (authorization_code)
-  H->>R: GETDEL auth_code:{code}
-  H->>R: SET refresh:{token} EX 36000
-  H-->>C: {accessToken, refreshToken, ...}
+```json
+{
+  "grant_type": "authorization_code",
+  "client_id": "gaceta",
+  "client_secret": "idh_sk_...",
+  "code": "...",
+  "redirect_uri": "https://gaceta.example.com/auth/callback",
+  "code_verifier": "..."
+}
 ```
+
+Validaciones:
+
+- aplicacion activa;
+- secreto valido si la app es confidencial;
+- code existente, no expirado y no reutilizado;
+- `client_id` y `redirect_uri` iguales al contexto guardado;
+- PKCE S256 correcto;
+- usuario activo;
+- usuario asignado a la aplicacion.
+
+### Refresh token
+
+Request minimo:
+
+```json
+{
+  "grant_type": "refresh_token",
+  "client_id": "gaceta",
+  "client_secret": "idh_sk_...",
+  "refresh_token": "..."
+}
+```
+
+El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido.
+
+## Access token
+
+El access token es un JWT RS256.
+
+Claims/headers relevantes:
+
+| Campo         | Valor                                  |
+| ------------- | -------------------------------------- |
+| `alg`         | `RS256`                                |
+| `kid`         | `main-key`                             |
+| `iss`         | `JWT_ISSUER`                           |
+| `aud`         | `clientId`                             |
+| `sub`         | id interno del usuario en Identity Hub |
+| `externalKey` | identificador estable para clientes    |
+| `name`        | nombre completo                        |
+| `exp`         | expiracion                             |
+
+Los clientes deben validar firma con JWKS, `iss`, `aud` y expiracion.
+
+## JWKS
+
+La llave publica se expone en:
+
+```http
+GET /.well-known/jwks.json
+```
+
+La llave privada no debe estar en el repositorio. Para rotacion futura se recomienda soportar varios `kid` durante una ventana de transicion.
+
+## Logout
+
+`POST /auth/logout` elimina la sesion global y revoca todos los refresh tokens indexados para el usuario. Es un logout global del Identity Hub, no un logout federado en cada cliente.
+
+Despues del logout, un nuevo `/oauth/authorize` debe requerir login nuevamente.
+
+## Contrato minimo para Gaceta/Intranet
+
+Cada cliente debe:
+
+- registrar una o mas `redirectUris` exactas;
+- generar y guardar `state` por intento de login;
+- usar PKCE S256;
+- canjear el code desde backend, no desde navegador publico si el cliente es confidencial;
+- validar JWT con JWKS, `iss`, `aud`, `exp` y firma RS256;
+- usar `externalKey` como identificador estable de usuario integrado;
+- manejar errores `access_denied`, code expirado, refresh expirado y refresh rotado;
+- no asumir roles internos desde Identity Hub.

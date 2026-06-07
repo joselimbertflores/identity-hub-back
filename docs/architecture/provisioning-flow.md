@@ -1,54 +1,63 @@
-# Flujo de provisionamiento de usuarios
+# Provisioning de usuarios
 
-## Objetivo
+El provisioning administra usuarios centrales del Identity Hub desde el panel administrativo.
 
-El provisionamiento administra el alta y mantenimiento administrativo de usuarios centrales de Identity Hub. Es un caso de uso compuesto: coordina reglas de usuarios, asignaciones de acceso y generación de documentos.
-
-```text
-ProvisioningModule
-├── UsersModule
-├── AccessModule
-└── PrinterModule
-```
+No forma parte del flujo OAuth publico. Es un caso de uso administrativo que coordina usuarios, asignacion de aplicaciones y credenciales temporales.
 
 ## Responsabilidades
 
-| Servicio                  | Responsabilidad                                                                                |
-| ------------------------- | ---------------------------------------------------------------------------------------------- |
-| `UserProvisioningService` | Orquestar el flujo completo y delimitar la transacción cuando corresponde                      |
-| `UsersService`            | Aplicar reglas propias del usuario central, como alta, actualización y credenciales temporales |
-| `UserApplicationsService` | Sincronizar la relación usuario-aplicación desde `AccessModule`                                |
-| `PrinterService`          | Convertir una definición de documento en un PDF                                                |
-
-`UserProvisioningService` pertenece a `ProvisioningModule` porque no representa un CRUD simple ni una regla exclusiva del usuario.
+| Componente                | Responsabilidad                                         |
+| ------------------------- | ------------------------------------------------------- |
+| `UserProvisioningService` | Orquestar alta/actualizacion y transacciones            |
+| `UsersService`            | Crear usuarios, actualizar datos y administrar password |
+| `UserApplicationsService` | Sincronizar asignaciones usuario-aplicacion             |
+| `PrinterService`          | Generar PDF de credenciales temporales                  |
 
 ## Alta de usuario
 
-1. Recibir los datos del usuario y las aplicaciones asignadas.
-2. Crear el usuario central mediante `UsersService`.
-3. Sincronizar aplicaciones mediante `UserApplicationsService`.
-4. Confirmar la transacción de persistencia.
-5. Generar el PDF con las credenciales temporales.
-6. Devolver el usuario con sus aplicaciones y el PDF codificado en Base64.
-7. Futuro: enviar las credenciales por correo.
-8. Futuro: registrar auditoría del proceso.
+1. El administrador envia datos del usuario y `applicationIds`.
+2. `UsersService` crea el usuario central con password temporal.
+3. `UserApplicationsService` valida aplicaciones activas y sincroniza asignaciones.
+4. La transaccion confirma usuario y relaciones.
+5. Se genera un PDF con credenciales temporales.
+6. La respuesta devuelve usuario con aplicaciones y `credentialsPdfBase64`.
 
-## Actualización y reinicio de credenciales
+## Actualizacion
 
-La actualización de usuario y aplicaciones se ejecuta dentro de una misma transacción. Si no se reciben aplicaciones, las asignaciones actuales se conservan.
+`PATCH /api/users/:id` actualiza datos del usuario. Si se envia `applicationIds`, se sincronizan asignaciones. Si no se envia, se conservan las actuales.
 
-El reinicio de credenciales genera una nueva contraseña temporal, marca el cambio obligatorio en el siguiente ingreso y devuelve un nuevo PDF.
+## Reset de credenciales
 
-## Rutas preservadas
+`POST /api/users/:id/reset-credentials` genera una nueva password temporal, marca `mustChangePassword=true` y devuelve un PDF nuevo.
 
-Con el prefijo global `/api`, las rutas administrativas actuales son:
+## Rutas administrativas
 
-| Método  | Ruta                               | Propósito                                                   |
-| ------- | ---------------------------------- | ----------------------------------------------------------- |
-| `POST`  | `/api/users`                       | Crear usuario, asignar aplicaciones y generar PDF           |
-| `PATCH` | `/api/users/:id`                   | Actualizar usuario y opcionalmente sincronizar aplicaciones |
-| `POST`  | `/api/users/:id/reset-credentials` | Regenerar credenciales temporales y PDF                     |
+Con el prefijo global `/api`:
 
-## Alcance
+| Metodo  | Ruta                                      | Uso                                             |
+| ------- | ----------------------------------------- | ----------------------------------------------- |
+| `POST`  | `/api/users`                              | Crear usuario y asignar aplicaciones            |
+| `PATCH` | `/api/users/:id`                          | Actualizar usuario y opcionalmente aplicaciones |
+| `POST`  | `/api/users/:id/reset-credentials`        | Regenerar credenciales temporales               |
+| `GET`   | `/api/users`                              | Listar usuarios para administracion             |
+| `POST`  | `/api/applications`                       | Crear aplicacion cliente                        |
+| `PATCH` | `/api/applications/:id`                   | Actualizar aplicacion cliente                   |
+| `POST`  | `/api/applications/:id/regenerate-secret` | Regenerar secreto                               |
 
-Este flujo no modifica OAuth, SSO, login, tokens, cookies ni guards. Tampoco importa usuarios desde aplicaciones cliente ni administra roles internos de esos sistemas.
+Todas requieren sesion del Hub y rol `ADMIN`.
+
+## Bootstrap vs provisioning
+
+El bootstrap manual (`npm run bootstrap:run`) solo crea el primer usuario `ADMIN` si no existe ningun admin.
+
+No crea aplicaciones cliente, no asigna usuarios y no reemplaza el panel administrativo.
+
+## Datos sensibles
+
+- La password temporal se devuelve en PDF base64 solo como resultado del alta/reset.
+- El secreto de aplicacion se devuelve solo al crear o regenerar.
+- No se deben loguear passwords, secretos ni PDFs de credenciales.
+
+## Limites
+
+Identity Hub no administra roles internos de Gaceta o Intranet. Solo decide si el usuario central puede acceder a la aplicacion cliente.

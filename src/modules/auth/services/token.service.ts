@@ -52,6 +52,7 @@ export class TokenService {
   }
 
   async consumeRefreshToken(refreshToken: string) {
+    // Refresh tokens are single-use; GETDEL implements rotation without a reuse window.
     const raw = await this.redis.getdel(this.buildRefreshTokenKey(refreshToken));
 
     if (!raw) {

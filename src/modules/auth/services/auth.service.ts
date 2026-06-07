@@ -102,6 +102,7 @@ export class AuthService {
 
     const session = JSON.parse(sessionRaw) as AuthSessionPayload;
 
+    // Logout is global for the Identity Hub session: all refresh tokens for the user are revoked.
     await this.tokenService.revokeAllForUser(session.userId);
     await this.redis.del(sessionKey);
 

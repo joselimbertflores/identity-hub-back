@@ -15,6 +15,7 @@ import { User } from 'src/modules/users/entities';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
+import { PkceService } from './pkce.service';
 import {
   AUTH_CODE_KEY_PREFIX,
   AUTH_CODE_TTL_SECONDS,
@@ -32,6 +33,7 @@ export class OAuthService {
     private readonly configService: ConfigService<EnvironmentVariables>,
     private readonly tokenService: TokenService,
     private readonly authService: AuthService,
+    private readonly pkceService: PkceService,
   ) {}
 
   async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined): Promise<string> {
@@ -43,7 +45,7 @@ export class OAuthService {
     }
 
     if (!app.redirectUris.includes(params.redirectUri)) {
-      // Never redirect to an unregistered redirect_uri.
+      // Do not normalize or partially match callbacks; an unregistered redirect_uri is never a redirect target.
       return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.ERROR, {
         error: 'invalid_redirect_uri',
       });
@@ -66,7 +68,7 @@ export class OAuthService {
       });
     }
 
-    const code = await this.createAuthCode(session.userId, params);
+    const code = await this.createAuthorizationCode(session.userId, params);
 
     return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
   }
@@ -95,15 +97,11 @@ export class OAuthService {
       client_id: pendingReq.clientId,
       redirect_uri: pendingReq.redirectUri,
       response_type: 'code',
+      code_challenge: pendingReq.codeChallenge,
+      code_challenge_method: pendingReq.codeChallengeMethod,
     });
 
-    if (pendingReq.scope) {
-      params.set('scope', pendingReq.scope);
-    }
-
-    if (pendingReq.state) {
-      params.set('state', pendingReq.state);
-    }
+    params.set('state', pendingReq.state);
 
     return `/oauth/authorize?${params.toString()}`;
   }
@@ -118,6 +116,7 @@ export class OAuthService {
   private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
     const key = `${AUTH_CODE_KEY_PREFIX}${dto.code}`;
 
+    // Authorization codes are one-time credentials; GETDEL prevents concurrent or repeated exchanges.
     const raw = await this.redis.getdel(key);
 
     if (!raw) throw new UnauthorizedException('Invalid or expired code.');
@@ -127,6 +126,9 @@ export class OAuthService {
     if (context.clientId !== dto.clientId || context.redirectUri !== dto.redirectUri) {
       throw new UnauthorizedException('Invalid client.');
     }
+
+    // PKCE is mandatory for authorization_code and only S256 challenges are accepted.
+    this.pkceService.verifyCodeVerifier(dto.codeVerifier, context.codeChallenge, context.codeChallengeMethod);
 
     const hasAccess = await this.authService.checkUserAppAccess(context.userId, app.id);
     if (!hasAccess) {
@@ -139,11 +141,15 @@ export class OAuthService {
       externalKey: user.externalKey,
       name: user.fullName,
       clientId: context.clientId,
-      scope: context.scope,
     });
   }
 
   private async handleRefreshTokenGrant(dto: TokenRequestDto, app: Application) {
+    if (!dto.refreshToken) {
+      throw new UnauthorizedException('refresh_token is required.');
+    }
+
+    // Refresh tokens rotate on every use; consuming first makes replay attempts fail closed.
     const data = await this.tokenService.consumeRefreshToken(dto.refreshToken);
 
     if (data.clientId !== app.clientId) {
@@ -163,18 +169,21 @@ export class OAuthService {
       name: user.fullName,
       externalKey: user.externalKey,
       clientId: data.clientId,
-      scope: data.scope,
     });
   }
 
-  private async createAuthCode(userId: string, { clientId, redirectUri, scope }: AuthorizeParamsDto) {
+  private async createAuthorizationCode(
+    userId: string,
+    { clientId, redirectUri, codeChallenge, codeChallengeMethod }: AuthorizeParamsDto,
+  ) {
     const code = crypto.randomUUID();
     const key = `${AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthorizationCodePayload = {
       userId,
       clientId,
       redirectUri,
-      scope,
+      codeChallenge,
+      codeChallengeMethod,
       createdAt: Date.now(),
     };
     await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
@@ -220,6 +229,7 @@ export class OAuthService {
 
   private async consumePendingAuthRequest(authRequestId: string): Promise<AuthorizeParamsDto | null> {
     const key = `${PENDING_AUTH_REQUEST_KEY_PREFIX}${authRequestId}`;
+    // A pending OAuth request should resume at most once after login.
     const data = await this.redis.getdel(key);
     if (!data) return null;
     return JSON.parse(data) as AuthorizeParamsDto;

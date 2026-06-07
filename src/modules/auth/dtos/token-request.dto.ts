@@ -1,5 +1,5 @@
 import { Expose } from 'class-transformer';
-import { IsEnum, IsString, IsNotEmpty, IsOptional, IsUrl, ValidateIf } from 'class-validator';
+import { IsEnum, IsString, IsNotEmpty, IsOptional, IsUrl, ValidateIf, Length, Matches } from 'class-validator';
 
 export enum GrantType {
   AUTHORIZATION_CODE = 'authorization_code',
@@ -33,8 +33,12 @@ export class TokenRequestDto {
   redirectUri?: string;
 
   @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
+  @Length(43, 128)
+  @Matches(/^[A-Za-z0-9._~-]+$/, {
+    message: 'code_verifier must contain only PKCE unreserved characters',
+  })
   @Expose({ name: 'code_verifier' })
   codeVerifier?: string;
 
@@ -42,5 +46,5 @@ export class TokenRequestDto {
   @IsString()
   @IsNotEmpty()
   @Expose({ name: 'refresh_token' })
-  refreshToken: string;
+  refreshToken?: string;
 }

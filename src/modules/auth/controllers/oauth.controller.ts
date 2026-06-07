@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 
 import { LoginDto, LoginParamsDto, TokenRequestDto, AuthorizeParamsDto } from '../dtos';
@@ -7,6 +8,7 @@ import { AuthException } from '../exceptions/auth.exception';
 import { Cookies, Public } from '../decorators';
 import { OAuthService } from '../services';
 import { EnvironmentVariables } from 'src/config';
+import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
 import { buildSessionCookieOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
 
 @Controller('oauth')
@@ -28,6 +30,8 @@ export class OAuthController {
   }
 
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: RATE_LIMIT_TTL_MS, limit: RATE_LIMITS.LOGIN } })
   @Post('login')
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
     const secure = this.configService.getOrThrow<boolean>('IDENTITY_COOKIE_SECURE');
@@ -48,6 +52,8 @@ export class OAuthController {
   }
 
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: RATE_LIMIT_TTL_MS, limit: RATE_LIMITS.TOKEN } })
   @Post('token')
   token(@Body() body: TokenRequestDto) {
     // OAuth token endpoint is machine-to-machine: JSON response, never browser redirects.

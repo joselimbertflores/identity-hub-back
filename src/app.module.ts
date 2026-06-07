@@ -4,6 +4,7 @@ import { RedisModule } from '@nestjs-modules/ioredis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { join } from 'path';
 
@@ -12,6 +13,7 @@ import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EnvironmentVariables, validate } from './config';
+import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from './config/rate-limit.config';
 
 @Module({
   imports: [
@@ -22,8 +24,6 @@ import { EnvironmentVariables, validate } from './config';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService<EnvironmentVariables>) => {
-        const isProduction = configService.get<string>('NODE_ENV') === 'production';
-
         return {
           type: 'postgres',
           host: configService.get('DATABASE_HOST'),
@@ -32,12 +32,18 @@ import { EnvironmentVariables, validate } from './config';
           username: configService.get('DATABASE_USER'),
           password: configService.get('DATABASE_PASSWORD'),
           autoLoadEntities: true,
-          synchronize: !isProduction,
+          synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
         };
       },
       inject: [ConfigService],
     }),
     CacheModule.register({ isGlobal: true }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: RATE_LIMIT_TTL_MS,
+        limit: RATE_LIMITS.DEFAULT,
+      },
+    ]),
 
     RedisModule.forRootAsync({
       useFactory: (configService: ConfigService<EnvironmentVariables>) => ({
