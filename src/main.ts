@@ -34,6 +34,6 @@ async function bootstrap() {
     app.enableCors({ origin: corsOrigin, credentials: true });
   }
 
-  await app.listen(configService.get<number>('PORT') ?? 3000);
+  await app.listen(configService.get<number>('PORT') ?? 3000, "192.168.30.34");
 }
 void bootstrap();

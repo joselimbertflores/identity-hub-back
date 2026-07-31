@@ -1,4 +1,4 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, validateSync } from 'class-validator';
 
 export class EnvironmentVariables {
@@ -36,6 +36,12 @@ export class EnvironmentVariables {
   JWT_PRIVATE_KEY_PATH: string;
 
   @IsBoolean()
+  @Transform(({ obj, key, value }) => {
+    const rawValue = (obj as Record<string, unknown>)[key];
+    if (rawValue === 'true') return true;
+    if (rawValue === 'false') return false;
+    return value;
+  })
   IDENTITY_COOKIE_SECURE: boolean;
 
   @IsOptional()
