@@ -89,15 +89,17 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 
 ## Estado en Redis
 
-| Clave                           | Contenido                                               | TTL   | Consumo                      |
-| ------------------------------- | ------------------------------------------------------- | ----- | ---------------------------- |
-| `session:{sessionId}`           | Usuario autenticado del navegador                       | 10h   | Lectura por sesion           |
-| `pending_oauth:{authRequestId}` | Request authorize validado y sesion vinculada si existe | 5 min | `GETDEL` al reanudar         |
-| `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp   | 5 min | `GETDEL` en canje            |
-| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera               | 10h   | `GETDEL` en refresh          |
-| `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | `SMEMBERS` y `DEL` en logout |
+| Clave                           | Contenido                                               | TTL   | Consumo                                               |
+| ------------------------------- | ------------------------------------------------------- | ----- | ----------------------------------------------------- |
+| `session:{sessionId}`           | Usuario autenticado del navegador                       | 10h   | Lectura por sesion                                    |
+| `pending_oauth:{authRequestId}` | Request authorize validado y sesion vinculada si existe | 5 min | `GETDEL` al reanudar                                  |
+| `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp   | 5 min | Lectura inicial y compare/delete atomico al completar |
+| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera               | 10h   | Lectura inicial y rotacion atomica al completar       |
+| `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | Actualizacion atomica al emitir o rotar; `DEL` logout |
 
-`GETDEL` evita reuso de requests pendientes, authorization codes y refresh tokens. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
+`GETDEL` evita reuso de requests pendientes. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
+
+Los authorization codes y refresh tokens no se eliminan durante su lectura inicial. Despues de validar el grant y preparar los tokens en memoria, un script Lua compara el valor actual con el valor exacto leido. Solo si coincide consume la credencial y persiste el refresh nuevo junto con su indice.
 
 ## Flujo completo
 
@@ -113,7 +115,7 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 10. Al reanudar, el Hub valida usuario activo, `mustChangePassword=false`, aplicacion activa y asignacion usuario-aplicacion.
 11. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
 12. El backend cliente llama `/oauth/token` con formulario URL-encoded. Los clientes confidenciales usan HTTP Basic; los publicos se identifican con `client_id`.
-13. El Hub consume el code, valida contexto, PKCE y nuevamente la elegibilidad del usuario, y emite access/refresh tokens.
+13. El Hub lee el code, valida contexto, PKCE y nuevamente la elegibilidad del usuario, prepara el par y finalmente consume el code al persistir el refresh nuevo de forma atomica.
 
 ## Token endpoint
 
@@ -156,6 +158,8 @@ Validaciones:
 - `mustChangePassword=false`;
 - usuario asignado a la aplicacion.
 
+El code se lee sin eliminarse. Si cualquiera de estas validaciones o la firma JWT falla, permanece disponible con su TTL original. Cuando el par ya esta preparado, un script Lua compara el payload exacto, elimina el code y guarda el refresh nuevo con su indice en una sola operacion atomica. Si otro request consumio, vencio o reemplazo la clave, la comparacion falla y se devuelve `invalid_grant`; el par preparado por el perdedor no se persiste ni se devuelve.
+
 ### Refresh token
 
 Request minimo:
@@ -170,7 +174,11 @@ grant_type=refresh_token&refresh_token=...
 
 Un cliente publico agrega `client_id=cliente-publico` al formulario, sin header Authorization.
 
-El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido. Antes de emitir el par nuevo se exige nuevamente usuario activo, aplicacion activa, asignacion vigente y `mustChangePassword=false`.
+El refresh se lee sin eliminarse. Primero se valida que pertenezca al cliente y que sigan vigentes el usuario, la aplicacion, la asignacion y `mustChangePassword=false`; despues se firma el access token y se prepara un refresh nuevo en memoria. Un script Lua compara el payload exacto leido y, solo si coincide, elimina el refresh anterior, persiste el nuevo, retira el token anterior de `user_refresh_tokens:{userId}`, agrega el nuevo y renueva el TTL del indice a 10 horas.
+
+El refresh anterior no puede reutilizarse y no existe periodo de gracia. Ante dos refresh simultaneos, ambos pueden completar las validaciones, pero solo el primer script encuentra el valor esperado. El ganador persiste y devuelve su par; el perdedor recibe `invalid_grant` sin eliminar ni modificar el token generado por el ganador. Un token presentado con otro cliente o que falla las validaciones no se consume.
+
+Los fallos de PostgreSQL, firma o Redis anteriores a la operacion final no consumen la credencial y conservan su naturaleza interna 500/503. Puede permanecer la ventana inevitable de un fallo de red despues de que Redis haya confirmado internamente el script pero antes de que el backend reciba la respuesta: el servidor no puede saber si la operacion se completo. Resolver esa ambiguedad requeriria idempotencia o estado adicional, fuera de esta fase.
 
 ### Respuesta exitosa
 

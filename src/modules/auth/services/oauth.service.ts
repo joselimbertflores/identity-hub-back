@@ -12,7 +12,6 @@ import { AuthException } from '../exceptions/auth.exception';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Application } from 'src/modules/access/entities';
 import { AuthorizationCodePayload, PendingAuthorizationRequest, TokenClientAuthentication } from '../interfaces';
-import { User } from 'src/modules/users/entities';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
@@ -29,7 +28,6 @@ import {
 export class OAuthService {
   constructor(
     @InjectRepository(Application) private readonly appRepository: Repository<Application>,
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRedis() private readonly redis: Redis,
     private readonly configService: ConfigService<EnvironmentVariables>,
     private readonly tokenService: TokenService,
@@ -148,8 +146,7 @@ export class OAuthService {
   private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
     const key = `${AUTH_CODE_KEY_PREFIX}${dto.code}`;
 
-    // Authorization codes are one-time credentials; GETDEL prevents concurrent or repeated exchanges.
-    const raw = await this.redis.getdel(key);
+    const raw = await this.redis.get(key);
 
     if (!raw) throw new UnauthorizedException('Invalid or expired code.');
 
@@ -167,12 +164,19 @@ export class OAuthService {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    return this.tokenService.generateTokenPair({
+    const preparedTokenPair = await this.tokenService.prepareTokenPair({
       sub: user.id,
       externalKey: user.externalKey,
       name: user.fullName,
       clientId: context.clientId,
     });
+
+    const completed = await this.tokenService.completeAuthorizationCodeGrant(dto.code!, raw, preparedTokenPair);
+    if (!completed) {
+      throw new UnauthorizedException('Invalid or expired code.');
+    }
+
+    return preparedTokenPair.tokens;
   }
 
   private async handleRefreshTokenGrant(dto: TokenRequestDto, app: Application) {
@@ -180,26 +184,39 @@ export class OAuthService {
       throw new UnauthorizedException('refresh_token is required.');
     }
 
-    // Refresh tokens rotate on every use; consuming first makes replay attempts fail closed.
-    const data = await this.tokenService.consumeRefreshToken(dto.refreshToken);
+    const storedRefreshToken = await this.tokenService.readRefreshToken(dto.refreshToken);
+    if (!storedRefreshToken) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
+
+    const data = storedRefreshToken.payload;
 
     if (data.clientId !== app.clientId) {
       throw new UnauthorizedException('invalid_client');
     }
-
-    await this.loadActiveUserOrRevokeTokens(data.userId);
 
     const user = await this.authService.findUserEligibleForOAuthCredentials(data.userId, app.id);
     if (!user) {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    return this.tokenService.generateTokenPair({
+    const preparedTokenPair = await this.tokenService.prepareTokenPair({
       sub: user.id,
       name: user.fullName,
       externalKey: user.externalKey,
       clientId: data.clientId,
     });
+
+    const rotated = await this.tokenService.rotateRefreshToken(
+      dto.refreshToken,
+      storedRefreshToken.raw,
+      preparedTokenPair,
+    );
+    if (!rotated) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
+
+    return preparedTokenPair.tokens;
   }
 
   private async createAuthorizationCode(
@@ -218,16 +235,6 @@ export class OAuthService {
     };
     await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
     return code;
-  }
-
-  private async loadActiveUserOrRevokeTokens(id: string): Promise<User> {
-    const user = await this.userRepository.findOne({ where: { id, isActive: true } });
-
-    if (!user) {
-      await this.tokenService.revokeAllForUser(id);
-      throw new UnauthorizedException('User not authorized.');
-    }
-    return user;
   }
 
   private async loadValidApplication(authentication: TokenClientAuthentication): Promise<Application> {

@@ -207,11 +207,15 @@ Usar `externalKey` como identificador estable de integracion. No usar `sub` como
 El refresh token es rotativo:
 
 1. El cliente envia el refresh actual a `/oauth/token`.
-2. Identity Hub consume ese refresh.
-3. Identity Hub devuelve nuevo access token y nuevo refresh token.
-4. El cliente reemplaza el refresh anterior inmediatamente.
+2. Identity Hub lo lee y valida cliente, usuario, aplicacion, asignacion y cambio obligatorio de password sin consumirlo.
+3. Identity Hub prepara el nuevo par.
+4. Una operacion Redis atomica compara y consume el refresh anterior, guarda el nuevo y actualiza el indice del usuario.
+5. Identity Hub devuelve el par solamente al request que completo esa operacion.
+6. El cliente reemplaza el refresh anterior inmediatamente.
 
-Si el refresh anterior se reutiliza, debe tratarse como invalido. Si hay concurrencia entre varias pestanas o procesos, el cliente debe serializar el refresh o manejar que una peticion falle porque otra ya roto el token.
+Si el refresh anterior se reutiliza, debe tratarse como invalido. Si hay concurrencia entre varias pestanas o procesos, el cliente debe serializar el refresh o manejar que una peticion falle con `invalid_grant` porque otra ya roto el token. La peticion perdedora no modifica el refresh nuevo del ganador.
+
+Un rechazo por cliente incorrecto, usuario inactivo, cambio obligatorio de password, aplicacion inactiva o asignacion revocada ocurre antes de consumir el refresh. Los fallos transitorios de base de datos, firma o Redis tampoco se presentan como `invalid_grant`.
 
 Request de refresh para un cliente confidencial:
 

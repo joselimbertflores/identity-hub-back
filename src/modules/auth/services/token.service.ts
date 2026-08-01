@@ -1,16 +1,44 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { JwtService } from '@nestjs/jwt';
 
 import Redis from 'ioredis';
 
-import { AccessTokenPayload, IssuedTokenPair, RefreshTokenPayload } from '../interfaces';
+import { AccessTokenPayload, PreparedTokenPair, StoredRefreshToken } from '../interfaces';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
+  AUTH_CODE_KEY_PREFIX,
   REFRESH_TOKEN_KEY_PREFIX,
   REFRESH_TOKEN_TTL_SECONDS,
   USER_REFRESH_TOKENS_KEY_PREFIX,
 } from '../constants/oauth.constants';
+
+const COMPLETE_AUTHORIZATION_CODE_GRANT_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current or current ~= ARGV[1] then
+  return 0
+end
+
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('SADD', KEYS[3], ARGV[4])
+redis.call('EXPIRE', KEYS[3], ARGV[3])
+return 1
+`;
+
+const ROTATE_REFRESH_TOKEN_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current or current ~= ARGV[1] then
+  return 0
+end
+
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('SREM', KEYS[3], ARGV[4])
+redis.call('SADD', KEYS[3], ARGV[5])
+redis.call('EXPIRE', KEYS[3], ARGV[3])
+return 1
+`;
 
 @Injectable()
 export class TokenService {
@@ -19,51 +47,81 @@ export class TokenService {
     private jwtService: JwtService,
   ) {}
 
-  async generateTokenPair(payload: AccessTokenPayload): Promise<IssuedTokenPair> {
+  async prepareTokenPair(payload: AccessTokenPayload): Promise<PreparedTokenPair> {
     const accessToken = await this.jwtService.signAsync(payload, {
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
       audience: payload.clientId,
     });
 
     const refreshToken = crypto.randomUUID();
-    const refreshTokenKey = this.buildRefreshTokenKey(refreshToken);
-    const userRefreshTokensKey = this.buildUserRefreshTokensKey(payload.sub);
-
-    const data: RefreshTokenPayload = {
-      userId: payload.sub,
-      clientId: payload.clientId,
-      scope: payload.scope,
-    };
-
-    await this.redis.set(refreshTokenKey, JSON.stringify(data), 'EX', REFRESH_TOKEN_TTL_SECONDS);
-
-    const pipeline = this.redis.pipeline();
-    pipeline.sadd(userRefreshTokensKey, refreshToken);
-    pipeline.expire(userRefreshTokensKey, REFRESH_TOKEN_TTL_SECONDS);
-    await pipeline.exec();
 
     return {
-      accessToken,
-      refreshToken,
-      accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
-      refreshTokenExpiresIn: REFRESH_TOKEN_TTL_SECONDS,
-      tokenType: 'Bearer',
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
+        refreshTokenExpiresIn: REFRESH_TOKEN_TTL_SECONDS,
+        tokenType: 'Bearer',
+      },
+      refreshTokenPayload: {
+        userId: payload.sub,
+        clientId: payload.clientId,
+        scope: payload.scope,
+      },
     };
   }
 
-  async consumeRefreshToken(refreshToken: string) {
-    // Refresh tokens are single-use; GETDEL implements rotation without a reuse window.
-    const raw = await this.redis.getdel(this.buildRefreshTokenKey(refreshToken));
+  async completeAuthorizationCodeGrant(
+    authorizationCode: string,
+    expectedAuthorizationCodePayload: string,
+    preparedTokenPair: PreparedTokenPair,
+  ): Promise<boolean> {
+    const { tokens, refreshTokenPayload } = preparedTokenPair;
+    const result = await this.redis.eval(
+      COMPLETE_AUTHORIZATION_CODE_GRANT_SCRIPT,
+      3,
+      `${AUTH_CODE_KEY_PREFIX}${authorizationCode}`,
+      this.buildRefreshTokenKey(tokens.refreshToken),
+      this.buildUserRefreshTokensKey(refreshTokenPayload.userId),
+      expectedAuthorizationCodePayload,
+      JSON.stringify(refreshTokenPayload),
+      REFRESH_TOKEN_TTL_SECONDS,
+      tokens.refreshToken,
+    );
 
-    if (!raw) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
+    return result === 1;
+  }
 
-    const data = JSON.parse(raw) as RefreshTokenPayload;
+  async readRefreshToken(refreshToken: string): Promise<StoredRefreshToken | null> {
+    const raw = await this.redis.get(this.buildRefreshTokenKey(refreshToken));
+    if (!raw) return null;
 
-    await this.redis.srem(this.buildUserRefreshTokensKey(data.userId), refreshToken);
+    return {
+      raw,
+      payload: JSON.parse(raw) as StoredRefreshToken['payload'],
+    };
+  }
 
-    return data;
+  async rotateRefreshToken(
+    refreshToken: string,
+    expectedRefreshTokenPayload: string,
+    preparedTokenPair: PreparedTokenPair,
+  ): Promise<boolean> {
+    const { tokens, refreshTokenPayload } = preparedTokenPair;
+    const result = await this.redis.eval(
+      ROTATE_REFRESH_TOKEN_SCRIPT,
+      3,
+      this.buildRefreshTokenKey(refreshToken),
+      this.buildRefreshTokenKey(tokens.refreshToken),
+      this.buildUserRefreshTokensKey(refreshTokenPayload.userId),
+      expectedRefreshTokenPayload,
+      JSON.stringify(refreshTokenPayload),
+      REFRESH_TOKEN_TTL_SECONDS,
+      refreshToken,
+      tokens.refreshToken,
+    );
+
+    return result === 1;
   }
 
   async revokeAllForUser(userId: string) {

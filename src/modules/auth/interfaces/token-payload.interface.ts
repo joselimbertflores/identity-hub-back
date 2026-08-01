@@ -20,3 +20,13 @@ export interface IssuedTokenPair {
   refreshTokenExpiresIn: number;
   tokenType: 'Bearer';
 }
+
+export interface PreparedTokenPair {
+  tokens: IssuedTokenPair;
+  refreshTokenPayload: RefreshTokenPayload;
+}
+
+export interface StoredRefreshToken {
+  raw: string;
+  payload: RefreshTokenPayload;
+}

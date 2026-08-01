@@ -80,11 +80,13 @@ WWW-Authenticate: Basic
 
 `invalid_grant` agrupa deliberadamente code inexistente, vencido o consumido; redirect incorrecto; PKCE invalido; refresh inexistente, revocado, consumido o de otro cliente; usuario inactivo o inexistente; perdida de asignacion; aplicacion ya no valida y `mustChangePassword=true`. El cliente no puede distinguir la causa interna.
 
+El code o refresh se lee y valida antes de consumirse. La operacion final compara atomicamente el valor exacto leido. Si dos requests usan la misma credencial, solo uno completa el grant; el otro recibe `invalid_grant`. Un callback, PKCE, cliente o estado de acceso invalido no consume prematuramente la credencial.
+
 Los parametros de formulario desconocidos se ignoran en este endpoint. Esta regla local no cambia el `ValidationPipe` ni el tratamiento de otros endpoints.
 
 `access_denied` no corresponde al token endpoint. Se utiliza unicamente durante authorize, despues de validar el callback, cuando el usuario no tiene acceso a la aplicacion.
 
-Los errores OAuth anteriores son rechazos definitivos del request presentado. Fallos inesperados de Redis, PostgreSQL, bcrypt, firma JWT u otra infraestructura no se convierten a `invalid_grant`: conservan una respuesta segura 500 o 503 para que la operacion pueda tratarse como transitoria.
+Los errores OAuth anteriores son rechazos definitivos del request presentado. Fallos inesperados de Redis, PostgreSQL, bcrypt, firma JWT u otra infraestructura no se convierten a `invalid_grant`: conservan una respuesta segura 500 o 503 para que la operacion pueda tratarse como transitoria. Si Redis aplica el script final pero la conexion falla antes de confirmar su resultado al backend, la respuesta queda necesariamente ambigua; no se agrega estado de idempotencia para resolver esa ventana en esta fase.
 
 ## Endpoints internos
 
