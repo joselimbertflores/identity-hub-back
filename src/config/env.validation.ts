@@ -1,5 +1,15 @@
 import { plainToInstance } from 'class-transformer';
-import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, validateSync } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  validateSync,
+} from 'class-validator';
 
 export class EnvironmentVariables {
   @IsNumber()
@@ -50,6 +60,12 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   @IsUrl({ require_tld: false })
   IDENTITY_HUB_UI_BASE_URL: string;
+
+  @IsString()
+  @Matches(/^\/[A-Za-z0-9/_-]*$/, {
+    message: 'IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH must be a relative UI path',
+  })
+  IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH: string;
 }
 
 export function validate(config: Record<string, unknown>) {

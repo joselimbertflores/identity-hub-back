@@ -46,12 +46,13 @@ http://10.10.20.15/auth/callback
 4. El backend cliente calcula `code_challenge = base64url(sha256(code_verifier))`.
 5. El backend cliente guarda `state` y `code_verifier` en sesion server-side o storage temporal seguro.
 6. El backend cliente redirige el navegador a `/oauth/authorize`.
-7. Identity Hub autentica al usuario si no tiene sesion global.
-8. Identity Hub valida acceso y devuelve `code` y `state` al callback registrado.
-9. El backend cliente valida que el `state` recibido coincida con el guardado.
-10. El backend cliente canjea el `code` en `/oauth/token` usando `clientSecret` y `code_verifier`.
-11. El backend cliente valida el access token con JWKS.
-12. El cliente crea o actualiza su sesion local.
+7. Identity Hub autentica al usuario si no tiene sesion global. Una password temporal crea una sesion restringida y pausa el flujo hasta que el usuario la cambie.
+8. Identity Hub conserva internamente el authorize validado durante esa pausa; el cliente no recibe callback ni code todavia.
+9. Identity Hub valida acceso y devuelve `code` y `state` al callback registrado cuando `mustChangePassword=false`.
+10. El backend cliente valida que el `state` recibido coincida con el guardado.
+11. El backend cliente canjea el `code` en `/oauth/token` usando `clientSecret` y `code_verifier`.
+12. El backend cliente valida el access token con JWKS.
+13. El cliente crea o actualiza su sesion local.
 
 ## Generacion y guardado de state
 
@@ -120,6 +121,8 @@ El backend cliente debe:
 5. continuar con el canje server-to-server.
 
 Si llega `error=access_denied`, el usuario esta autenticado pero no tiene acceso a esa aplicacion.
+
+`mustChangePassword` no produce `access_denied` durante el authorize interactivo: el navegador permanece dentro de las rutas internas del Hub hasta completar la accion. El callback registrado solo recibe una respuesta despues de reanudar y revalidar el flujo.
 
 ## Canje del code
 
@@ -204,6 +207,7 @@ Identity Hub no implementa logout federado hacia todos los clientes. Si el usuar
 | `invalid_client`            | `clientId` o secreto incorrecto/inactivo                  | Revisar registro y secreto          |
 | `access_denied`             | Usuario sin asignacion a la aplicacion                    | Asignar usuario desde el panel      |
 | Refresh invalido            | Token vencido, rotado o revocado por logout               | Reiniciar login                     |
+| Grant rechazado tras reset  | El usuario debe cambiar su password en Identity Hub       | Reiniciar authorize en el navegador |
 | JWT con `aud` incorrecto    | Token emitido para otro cliente                           | Rechazar token                      |
 
 ## Checklist de integracion

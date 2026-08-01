@@ -7,7 +7,7 @@ Identity Hub usa OAuth 2.0 Authorization Code con PKCE S256 obligatorio. El nave
 | Actor              | Responsabilidad                                                            |
 | ------------------ | -------------------------------------------------------------------------- |
 | Navegador          | Sigue redirects y transporta la cookie `session_id` del Hub                |
-| Identity Hub UI    | Muestra login, home y pantalla de error del Hub                            |
+| Identity Hub UI    | Muestra login, cambio de password, home y pantalla de error del Hub        |
 | Identity Hub API   | Valida clientes, usuarios, acceso, PKCE, emite codes/tokens y publica JWKS |
 | Aplicacion cliente | Inicia `/oauth/authorize`, guarda `state`, genera PKCE y canjea el code    |
 | Redis              | Guarda estado efimero del flujo                                            |
@@ -83,17 +83,21 @@ Cookie:
 
 Si no hay sesion, el Hub crea un request pendiente en Redis y redirige a la UI de login.
 
+Las credenciales validas siempre pueden crear una sesion central. Si `mustChangePassword=true`, esa sesion queda restringida: permite consultar `/api/auth/status`, cambiar la password y cerrar sesion, pero los endpoints normales siguen bloqueados por `PasswordChangeGuard`. `/api/auth/status` incluye `mustChangePassword` dentro del usuario autenticado y no expone el hash ni datos de credenciales.
+
+La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` y se resuelve contra `IDENTITY_HUB_UI_BASE_URL`. No es un callback OAuth y el navegador no puede sustituirla mediante `returnUrl` o `redirect_uri`.
+
 ## Estado en Redis
 
-| Clave                           | Contenido                                             | TTL   | Consumo                      |
-| ------------------------------- | ----------------------------------------------------- | ----- | ---------------------------- |
-| `session:{sessionId}`           | Usuario autenticado del navegador                     | 10h   | Lectura por sesion           |
-| `pending_oauth:{authRequestId}` | Request authorize pendiente                           | 5 min | `GETDEL` al reanudar login   |
-| `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp | 5 min | `GETDEL` en canje            |
-| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera             | 10h   | `GETDEL` en refresh          |
-| `user_refresh_tokens:{userId}`  | Indice para revocacion global                         | 10h   | `SMEMBERS` y `DEL` en logout |
+| Clave                           | Contenido                                               | TTL   | Consumo                      |
+| ------------------------------- | ------------------------------------------------------- | ----- | ---------------------------- |
+| `session:{sessionId}`           | Usuario autenticado del navegador                       | 10h   | Lectura por sesion           |
+| `pending_oauth:{authRequestId}` | Request authorize validado y sesion vinculada si existe | 5 min | `GETDEL` al reanudar         |
+| `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp   | 5 min | `GETDEL` en canje            |
+| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera               | 10h   | `GETDEL` en refresh          |
+| `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | `SMEMBERS` y `DEL` en logout |
 
-`GETDEL` evita reuso de requests pendientes, authorization codes y refresh tokens.
+`GETDEL` evita reuso de requests pendientes, authorization codes y refresh tokens. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
 
 ## Flujo completo
 
@@ -101,12 +105,15 @@ Si no hay sesion, el Hub crea un request pendiente en Redis y redirige a la UI d
 2. El cliente redirige a `/oauth/authorize`.
 3. El Hub valida cliente activo, `redirect_uri` exacta, `response_type`, `state` y PKCE.
 4. Si no hay `session_id`, el Hub guarda `pending_oauth:{id}` y redirige a `/login?auth_request_id=id`.
-5. El usuario hace login en `/oauth/login`.
-6. El Hub crea `session_id`, consume el pending OAuth y reanuda `/oauth/authorize`.
-7. El Hub valida usuario activo y asignacion usuario-aplicacion.
-8. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
-9. El backend cliente llama `/oauth/token` con `grant_type=authorization_code`, `client_id`, secreto si aplica, `redirect_uri`, `code` y `code_verifier`.
-10. El Hub consume el code, valida contexto y PKCE, y emite access/refresh tokens.
+5. El usuario hace login en `/oauth/login` y el Hub crea `session_id`.
+6. Si `mustChangePassword=false`, el Hub consume el pending y reanuda `/oauth/authorize`.
+7. Si `mustChangePassword=true`, conserva y vincula el pending, mantiene la sesion y dirige a la ruta interna de cambio de password.
+8. Un `/oauth/authorize` iniciado con sesion restringida primero valida cliente y callback, guarda el request validado como pending y dirige a la misma ruta interna. No devuelve `access_denied` ni emite code en esta etapa.
+9. `PATCH /api/auth/change-password` actualiza hash y flag en una sola escritura. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home configurado si no existe o ya vencio.
+10. Al reanudar, el Hub valida usuario activo, `mustChangePassword=false`, aplicacion activa y asignacion usuario-aplicacion.
+11. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
+12. El backend cliente llama `/oauth/token` con `grant_type=authorization_code`, `client_id`, secreto si aplica, `redirect_uri`, `code` y `code_verifier`.
+13. El Hub consume el code, valida contexto, PKCE y nuevamente la elegibilidad del usuario, y emite access/refresh tokens.
 
 ## Token endpoint
 
@@ -133,6 +140,7 @@ Validaciones:
 - `client_id` y `redirect_uri` iguales al contexto guardado;
 - PKCE S256 correcto;
 - usuario activo;
+- `mustChangePassword=false`;
 - usuario asignado a la aplicacion.
 
 ### Refresh token
@@ -148,7 +156,19 @@ Request minimo:
 }
 ```
 
-El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido.
+El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido. Antes de emitir el par nuevo se exige nuevamente usuario activo, aplicacion activa, asignacion vigente y `mustChangePassword=false`.
+
+Un reset administrativo establece `mustChangePassword=true`. Los authorization codes y refresh tokens presentados desde ese momento no producen tokens nuevos. Los access tokens JWT ya emitidos siguen siendo validos hasta su expiracion; no existe blacklist en esta fase. Tras cambiar correctamente la password, el usuario puede iniciar o reanudar autorizaciones nuevas.
+
+## Contrato de redireccion del Hub
+
+- `IDENTITY_HUB_UI_BASE_URL` identifica el origen publico donde vive la UI del Hub.
+- `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` es una ruta relativa configurada, sin host, query ni fragmento.
+- En desarrollo con UI separada, la base apunta al origen de Angular y se habilita `CORS_ORIGIN` con credenciales.
+- En produccion de mismo origen, la base apunta al origen publico del backend que sirve `public/browser`.
+- `/login`, la ruta de cambio, `/home/welcome` y `/auth/error` son rutas internas del Hub.
+- `Application.redirectUris` contiene callbacks externos registrados y solo se usa despues de validacion exacta.
+- La UI debe conservar `auth_request_id`, enviarlo como query en `PATCH /api/auth/change-password` y navegar al `redirectUrl` de la respuesta. No debe enviar un `returnUrl`.
 
 ## Access token
 

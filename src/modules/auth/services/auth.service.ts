@@ -81,6 +81,10 @@ export class AuthService {
     return session ? (JSON.parse(session) as AuthSessionPayload) : null;
   }
 
+  async findActiveUser(userId: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { id: userId, isActive: true } });
+  }
+
   async removeAuthSession(sessionId: string | undefined) {
     if (!sessionId) {
       // throw new BadRequestException('Invalid session id');
@@ -112,14 +116,15 @@ export class AuthService {
     };
   }
 
-  async checkUserAppAccess(userId: string, applicationId: number): Promise<boolean> {
-    return await this.userRepository
+  async findUserEligibleForOAuthCredentials(userId: string, applicationId: number): Promise<User | null> {
+    return this.userRepository
       .createQueryBuilder('user')
       .innerJoin('user.applications', 'application')
       .where('user.id = :userId', { userId })
       .andWhere('user.isActive = true')
+      .andWhere('user.mustChangePassword = false')
       .andWhere('application.id = :applicationId', { applicationId })
       .andWhere('application.isActive = true')
-      .getExists();
+      .getOne();
   }
 }

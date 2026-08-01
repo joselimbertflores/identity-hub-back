@@ -54,6 +54,7 @@ export class UsersService {
       ...dto,
       password: passwordHash,
       externalKey,
+      mustChangePassword: true,
     });
 
     const user = await repository.save(model);

@@ -16,7 +16,7 @@ No forma parte del flujo OAuth publico. Es un caso de uso administrativo que coo
 ## Alta de usuario
 
 1. El administrador envia datos del usuario y `applicationIds`.
-2. `UsersService` crea el usuario central con password temporal.
+2. `UsersService` crea el usuario central con password temporal y `mustChangePassword=true`.
 3. `UserApplicationsService` valida aplicaciones activas y sincroniza asignaciones.
 4. La transaccion confirma usuario y relaciones.
 5. Se genera un PDF con credenciales temporales.
@@ -29,6 +29,10 @@ No forma parte del flujo OAuth publico. Es un caso de uso administrativo que coo
 ## Reset de credenciales
 
 `POST /api/users/:id/reset-credentials` genera una nueva password temporal, marca `mustChangePassword=true` y devuelve un PDF nuevo.
+
+Desde ese reset no se emiten nuevos authorization codes ni pares de tokens para el usuario hasta que este cambie correctamente la password. Los codes presentados y los refresh tokens existentes son rechazados por la validacion central de OAuth. Los access tokens JWT ya emitidos conservan su expiracion normal.
+
+Solo `PATCH /api/auth/change-password`, ejecutado por el usuario dentro de su sesion central, establece `mustChangePassword=false`. Provisioning y administracion no limpian el flag al entregar una credencial temporal.
 
 ## Rutas administrativas
 
@@ -51,6 +55,8 @@ Todas requieren sesion del Hub y rol `ADMIN`.
 El bootstrap manual (`npm run bootstrap:run`) solo crea el primer usuario `ADMIN` si no existe ningun admin.
 
 No crea aplicaciones cliente, no asigna usuarios y no reemplaza el panel administrativo.
+
+El usuario bootstrap se crea con `mustChangePassword=true`, igual que cualquier otra credencial inicial administrada.
 
 ## Datos sensibles
 

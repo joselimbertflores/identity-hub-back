@@ -4,24 +4,29 @@ Este documento describe como configurar Identity Hub en desarrollo, staging y pr
 
 ## Variables
 
-| Variable                   | Uso                            | Desarrollo                                    | Produccion                        |
-| -------------------------- | ------------------------------ | --------------------------------------------- | --------------------------------- |
-| `PORT`                     | Puerto HTTP del backend        | `8000`                                        | segun despliegue                  |
-| `DATABASE_HOST`            | Host PostgreSQL                | `localhost`                                   | host privado                      |
-| `DATABASE_PORT`            | Puerto PostgreSQL              | `5432`                                        | `5432`                            |
-| `DATABASE_NAME`            | Nombre de base                 | `identity_hub`                                | `identity_hub`                    |
-| `DATABASE_USER`            | Usuario DB                     | `postgres`                                    | usuario dedicado                  |
-| `DATABASE_PASSWORD`        | Password DB                    | `postgres`                                    | secreto seguro                    |
-| `DB_SYNCHRONIZE`           | Sincronizacion TypeORM runtime | `true` solo local                             | `false`                           |
-| `REDIS_URL`                | Conexion Redis                 | `redis://localhost:6379`                      | Redis privado, auth/TLS si aplica |
-| `JWT_PRIVATE_KEY_PATH`     | Llave privada RSA              | `keys/private.pem`                            | secreto fuera del repo            |
-| `JWT_PUBLIC_KEY_PATH`      | Llave publica RSA              | `keys/public.pem`                             | ruta publica/segura               |
-| `JWT_ISSUER`               | Claim `iss`                    | `identity-hub`                                | valor estable                     |
-| `IDENTITY_HUB_UI_BASE_URL` | URL publica de la UI           | `http://localhost:4200`                       | dominio HTTPS                     |
-| `IDENTITY_COOKIE_SECURE`   | Cookie `secure`                | `false`                                       | `true`                            |
-| `CORS_ORIGIN`              | Habilita CORS solo si existe   | `http://localhost:4200` si UI usa otro origen | definir solo si aplica            |
+| Variable                               | Uso                            | Desarrollo                                    | Produccion                        |
+| -------------------------------------- | ------------------------------ | --------------------------------------------- | --------------------------------- |
+| `PORT`                                 | Puerto HTTP del backend        | `8000`                                        | segun despliegue                  |
+| `DATABASE_HOST`                        | Host PostgreSQL                | `localhost`                                   | host privado                      |
+| `DATABASE_PORT`                        | Puerto PostgreSQL              | `5432`                                        | `5432`                            |
+| `DATABASE_NAME`                        | Nombre de base                 | `identity_hub`                                | `identity_hub`                    |
+| `DATABASE_USER`                        | Usuario DB                     | `postgres`                                    | usuario dedicado                  |
+| `DATABASE_PASSWORD`                    | Password DB                    | `postgres`                                    | secreto seguro                    |
+| `DB_SYNCHRONIZE`                       | Sincronizacion TypeORM runtime | `true` solo local                             | `false`                           |
+| `REDIS_URL`                            | Conexion Redis                 | `redis://localhost:6379`                      | Redis privado, auth/TLS si aplica |
+| `JWT_PRIVATE_KEY_PATH`                 | Llave privada RSA              | `keys/private.pem`                            | secreto fuera del repo            |
+| `JWT_PUBLIC_KEY_PATH`                  | Llave publica RSA              | `keys/public.pem`                             | ruta publica/segura               |
+| `JWT_ISSUER`                           | Claim `iss`                    | `identity-hub`                                | valor estable                     |
+| `IDENTITY_HUB_UI_BASE_URL`             | Origen publico de la UI        | `http://localhost:4200`                       | origen HTTPS del Hub              |
+| `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` | Ruta UI interna de cambio      | `/change-password`                            | ruta Angular desplegada           |
+| `IDENTITY_COOKIE_SECURE`               | Cookie `secure`                | `false`                                       | `true`                            |
+| `CORS_ORIGIN`                          | Habilita CORS solo si existe   | `http://localhost:4200` si UI usa otro origen | definir solo si aplica            |
 
 La sincronizacion del esquema se controla solo con `DB_SYNCHRONIZE`.
+
+`IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` debe comenzar con `/` y no puede contener host, query ni fragmento. El backend la resuelve siempre contra `IDENTITY_HUB_UI_BASE_URL`; no acepta un destino equivalente desde el navegador.
+
+Si Angular corre separado en desarrollo, `IDENTITY_HUB_UI_BASE_URL` apunta a su origen y `CORS_ORIGIN` permite ese origen con cookies. Si Nest sirve `public/browser` en produccion, la base debe ser el origen publico del mismo backend. En ambos casos las rutas de login, cambio de password, home y error son internas del Hub; no deben confundirse con callbacks OAuth almacenados en `Application.redirectUris`.
 
 ## DB_SYNCHRONIZE vs migraciones
 
