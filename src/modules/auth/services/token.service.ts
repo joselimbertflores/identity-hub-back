@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import Redis from 'ioredis';
 
-import { AccessTokenPayload, RefreshTokenPayload } from '../interfaces';
+import { AccessTokenPayload, IssuedTokenPair, RefreshTokenPayload } from '../interfaces';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_KEY_PREFIX,
@@ -19,7 +19,7 @@ export class TokenService {
     private jwtService: JwtService,
   ) {}
 
-  async generateTokenPair(payload: AccessTokenPayload) {
+  async generateTokenPair(payload: AccessTokenPayload): Promise<IssuedTokenPair> {
     const accessToken = await this.jwtService.signAsync(payload, {
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
       audience: payload.clientId,

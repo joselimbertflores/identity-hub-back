@@ -9,8 +9,9 @@ import Redis from 'ioredis';
 
 import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, LoginDto, GrantType } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
+import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Application } from 'src/modules/access/entities';
-import { AuthorizationCodePayload, PendingAuthorizationRequest } from '../interfaces';
+import { AuthorizationCodePayload, PendingAuthorizationRequest, TokenClientAuthentication } from '../interfaces';
 import { User } from 'src/modules/users/entities';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
@@ -85,8 +86,15 @@ export class OAuthService {
     return { sessionId, mustChangePassword: user.mustChangePassword };
   }
 
-  async handleTokenRequest(dto: TokenRequestDto) {
-    const app = await this.loadValidApplication(dto.clientId, dto.clientSecret);
+  async handleTokenRequest(
+    dto: TokenRequestDto,
+    authentication: TokenClientAuthentication = { method: 'none', clientId: dto.clientId },
+  ) {
+    if (authentication.clientId !== dto.clientId) {
+      throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
+    }
+
+    const app = await this.loadValidApplication(authentication);
     return dto.grantType === GrantType.AUTHORIZATION_CODE
       ? this.handleAuthorizationCodeGrant(dto, app)
       : this.handleRefreshTokenGrant(dto, app);
@@ -222,22 +230,26 @@ export class OAuthService {
     return user;
   }
 
-  private async loadValidApplication(clientId: string, clientSecret?: string): Promise<Application> {
+  private async loadValidApplication(authentication: TokenClientAuthentication): Promise<Application> {
     const app = await this.appRepository
       .createQueryBuilder('app')
       .addSelect('app.clientSecretHash')
-      .where('app.clientId = :clientId', { clientId })
+      .where('app.clientId = :clientId', { clientId: authentication.clientId })
       .andWhere('app.isActive = true')
       .getOne();
 
-    if (!app) throw new UnauthorizedException('Invalid client id.');
+    if (!app) throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
 
     if (app.isConfidential) {
-      if (!clientSecret) throw new UnauthorizedException('Client secret is required.');
-      const isSecretValid = await compare(clientSecret, app.clientSecretHash);
-      if (!isSecretValid) {
-        throw new UnauthorizedException('Invalid client secret.');
+      if (authentication.method !== 'basic') {
+        throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
       }
+      const isSecretValid = await compare(authentication.clientSecret, app.clientSecretHash);
+      if (!isSecretValid) {
+        throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
+      }
+    } else if (authentication.method !== 'none') {
+      throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
     }
     return app;
   }

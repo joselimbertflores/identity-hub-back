@@ -12,3 +12,11 @@ export class RefreshTokenPayload {
   clientId: string;
   scope?: string;
 }
+
+export interface IssuedTokenPair {
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresIn: number;
+  refreshTokenExpiresIn: number;
+  tokenType: 'Bearer';
+}

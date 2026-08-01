@@ -1,5 +1,5 @@
 import { Expose } from 'class-transformer';
-import { IsEnum, IsString, IsNotEmpty, IsOptional, IsUrl, ValidateIf, Length, Matches } from 'class-validator';
+import { IsEnum, IsString, IsNotEmpty, IsUrl, ValidateIf, Length, Matches } from 'class-validator';
 
 export enum GrantType {
   AUTHORIZATION_CODE = 'authorization_code',
@@ -15,14 +15,10 @@ export class TokenRequestDto {
   @Expose({ name: 'client_id' })
   clientId: string;
 
-  @IsOptional()
-  @IsString()
-  @Expose({ name: 'client_secret' })
-  clientSecret?: string;
-
   @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)
   @IsString()
   @IsNotEmpty()
+  @Expose()
   code?: string;
 
   @ValidateIf((o: TokenRequestDto) => o.grantType === GrantType.AUTHORIZATION_CODE)

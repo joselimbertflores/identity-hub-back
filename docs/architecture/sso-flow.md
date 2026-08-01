@@ -112,25 +112,38 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 9. `PATCH /api/auth/change-password` actualiza hash y flag en una sola escritura. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home configurado si no existe o ya vencio.
 10. Al reanudar, el Hub valida usuario activo, `mustChangePassword=false`, aplicacion activa y asignacion usuario-aplicacion.
 11. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
-12. El backend cliente llama `/oauth/token` con `grant_type=authorization_code`, `client_id`, secreto si aplica, `redirect_uri`, `code` y `code_verifier`.
+12. El backend cliente llama `/oauth/token` con formulario URL-encoded. Los clientes confidenciales usan HTTP Basic; los publicos se identifican con `client_id`.
 13. El Hub consume el code, valida contexto, PKCE y nuevamente la elegibilidad del usuario, y emite access/refresh tokens.
 
 ## Token endpoint
+
+`POST /oauth/token` acepta exclusivamente:
+
+```http
+Content-Type: application/x-www-form-urlencoded
+```
+
+Los nombres externos son snake_case y los unicos grants soportados son `authorization_code` y `refresh_token`. No se admite `scope`.
+
+Los clientes confidenciales se autentican exclusivamente mediante HTTP Basic. Para construir el header, el cliente aplica primero la codificacion `application/x-www-form-urlencoded` al identificador y al secreto por separado, une ambos valores codificados con `:` y codifica el resultado UTF-8 en Base64. El servidor realiza el proceso inverso despues de decodificar Base64.
+
+En una solicitud confidencial, `client_id` no es obligatorio en el formulario porque se obtiene de Basic. Puede enviarse opcionalmente, pero debe coincidir. Los clientes publicos no envian Basic y deben incluir `client_id` en el formulario. El campo `client_secret` no se admite en el body: por si solo produce `invalid_client` y combinado con Basic produce `invalid_request`.
+
+Los parametros de formulario desconocidos se ignoran. Los parametros conocidos repetidos, los valores invalidos, las combinaciones ambiguas y la ausencia de parametros requeridos producen `invalid_request`.
 
 ### Authorization code
 
 Request minimo:
 
-```json
-{
-  "grant_type": "authorization_code",
-  "client_id": "cliente-oauth",
-  "client_secret": "idh_sk_...",
-  "code": "...",
-  "redirect_uri": "https://cliente.example.com/auth/callback",
-  "code_verifier": "..."
-}
+```http
+POST /oauth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
+
+grant_type=authorization_code&code=...&redirect_uri=https%3A%2F%2Fcliente.example.com%2Fauth%2Fcallback&code_verifier=...
 ```
+
+Un cliente publico usa el mismo formulario y agrega `client_id=cliente-publico`, sin header Authorization.
 
 Validaciones:
 
@@ -147,16 +160,37 @@ Validaciones:
 
 Request minimo:
 
+```http
+POST /oauth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
+
+grant_type=refresh_token&refresh_token=...
+```
+
+Un cliente publico agrega `client_id=cliente-publico` al formulario, sin header Authorization.
+
+El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido. Antes de emitir el par nuevo se exige nuevamente usuario activo, aplicacion activa, asignacion vigente y `mustChangePassword=false`.
+
+### Respuesta exitosa
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Pragma: no-cache
+```
+
 ```json
 {
-  "grant_type": "refresh_token",
-  "client_id": "cliente-oauth",
-  "client_secret": "idh_sk_...",
-  "refresh_token": "..."
+  "access_token": "...",
+  "refresh_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token_expires_in": 36000
 }
 ```
 
-El refresh token se consume y se reemplaza por uno nuevo. El token anterior no puede reutilizarse. Si se usa con otro cliente, falla y queda consumido. Antes de emitir el par nuevo se exige nuevamente usuario activo, aplicacion activa, asignacion vigente y `mustChangePassword=false`.
+`refresh_token_expires_in` es una extension propia de Identity Hub. La respuesta no incluye aliases camelCase ni `scope`.
 
 Un reset administrativo establece `mustChangePassword=true`. Los authorization codes y refresh tokens presentados desde ese momento no producen tokens nuevos. Los access tokens JWT ya emitidos siguen siendo validos hasta su expiracion; no existe blacklist en esta fase. Tras cambiar correctamente la password, el usuario puede iniciar o reanudar autorizaciones nuevas.
 

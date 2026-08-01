@@ -8,8 +8,8 @@ Aplica especialmente a clientes con backend propio y secreto confidencial. Gacet
 
 La aplicacion cliente necesita:
 
-- `clientId` registrado en Identity Hub;
-- `clientSecret` si es cliente confidencial;
+- `client_id` registrado en Identity Hub;
+- `client_secret` si es cliente confidencial;
 - una o mas `redirectUris` registradas exactamente;
 - acceso al JWKS publico del Hub;
 - almacenamiento temporal server-side para `state` y `code_verifier`;
@@ -50,7 +50,7 @@ http://10.10.20.15/auth/callback
 8. Identity Hub conserva internamente el authorize validado durante esa pausa; el cliente no recibe callback ni code todavia.
 9. Identity Hub valida acceso y devuelve `code` y `state` al callback registrado cuando `mustChangePassword=false`.
 10. El backend cliente valida que el `state` recibido coincida con el guardado.
-11. El backend cliente canjea el `code` en `/oauth/token` usando `clientSecret` y `code_verifier`.
+11. El backend cliente canjea el `code` en `/oauth/token` usando HTTP Basic si es confidencial y enviando `code_verifier`.
 12. El backend cliente valida el access token con JWKS.
 13. El cliente crea o actualiza su sesion local.
 
@@ -129,29 +129,54 @@ Si llega `error=access_denied`, el usuario esta autenticado pero no tiene acceso
 El backend cliente llama:
 
 ```http
-POST /oauth/token
-```
+POST /oauth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
 
-Body:
-
-```json
-{
-  "grant_type": "authorization_code",
-  "client_id": "cliente-oauth",
-  "client_secret": "idh_sk_...",
-  "code": "...",
-  "redirect_uri": "https://cliente.example.com/auth/callback",
-  "code_verifier": "..."
-}
+grant_type=authorization_code&code=...&redirect_uri=https%3A%2F%2Fcliente.example.com%2Fauth%2Fcallback&code_verifier=...
 ```
 
 Reglas:
 
 - el canje debe hacerse desde backend;
-- `client_secret` no debe exponerse al navegador;
+- clientes confidenciales: HTTP Basic es el unico mecanismo admitido y el secreto no debe exponerse al navegador;
+- construir Basic codificando primero el identificador y el secreto por separado como componentes `application/x-www-form-urlencoded`, unirlos con `:` y codificar el resultado UTF-8 en Base64;
+- en clientes confidenciales, `client_id` no es obligatorio en el formulario; si se envia, debe coincidir con Basic;
+- clientes publicos: enviar `client_id` en el formulario, sin Basic ni secreto;
+- `client_secret` no se admite en el body; por si solo falla con `invalid_client` y junto con Basic falla con `invalid_request`;
+- los parametros desconocidos se ignoran; parametros conocidos repetidos o valores invalidos producen `invalid_request`;
 - `redirect_uri` debe ser la misma usada en authorize;
 - `code_verifier` debe ser el valor original;
 - el code solo sirve una vez.
+
+Ejemplo equivalente para un cliente publico:
+
+```http
+POST /oauth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code&code=...&redirect_uri=https%3A%2F%2Fcliente.example.com%2Fauth%2Fcallback&code_verifier=...&client_id=cliente-publico
+```
+
+Respuesta:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Pragma: no-cache
+```
+
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token_expires_in": 36000
+}
+```
+
+`refresh_token_expires_in` es una extension de Identity Hub. No se devuelven los nombres camelCase anteriores ni `scope`.
 
 ## Validacion de JWT
 
@@ -188,6 +213,18 @@ El refresh token es rotativo:
 
 Si el refresh anterior se reutiliza, debe tratarse como invalido. Si hay concurrencia entre varias pestanas o procesos, el cliente debe serializar el refresh o manejar que una peticion falle porque otra ya roto el token.
 
+Request de refresh para un cliente confidencial:
+
+```http
+POST /oauth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
+
+grant_type=refresh_token&refresh_token=...
+```
+
+Un cliente publico agrega `client_id=cliente-publico` al formulario y no envia Authorization.
+
 ## Logout
 
 `POST /auth/logout` cierra la sesion global del Hub y revoca refresh tokens indexados para el usuario.
@@ -202,9 +239,10 @@ Identity Hub no implementa logout federado hacia todos los clientes. Si el usuar
 | --------------------------- | --------------------------------------------------------- | ----------------------------------- |
 | `invalid_redirect_uri`      | Callback no registrado exactamente                        | Corregir `redirectUris` en el Hub   |
 | Validacion de `state` falla | Sesion local perdida o intento no iniciado por el cliente | Rechazar callback y reiniciar login |
-| `Invalid or expired code`   | Code vencido o reutilizado                                | Reiniciar authorize                 |
-| `Invalid code_verifier`     | PKCE no corresponde al challenge                          | Revisar guardado de `code_verifier` |
-| `invalid_client`            | `clientId` o secreto incorrecto/inactivo                  | Revisar registro y secreto          |
+| `invalid_request`           | Formulario incompleto, invalido o ambiguo                 | Corregir el request                 |
+| `invalid_grant`             | Code, PKCE o refresh invalido; acceso ya no elegible      | Reiniciar authorize                 |
+| `invalid_client`            | `client_id` o secreto incorrecto/inactivo                 | Revisar registro y secreto          |
+| `unsupported_grant_type`    | `grant_type` no soportado                                 | Usar code o refresh                 |
 | `access_denied`             | Usuario sin asignacion a la aplicacion                    | Asignar usuario desde el panel      |
 | Refresh invalido            | Token vencido, rotado o revocado por logout               | Reiniciar login                     |
 | Grant rechazado tras reset  | El usuario debe cambiar su password en Identity Hub       | Reiniciar authorize en el navegador |
