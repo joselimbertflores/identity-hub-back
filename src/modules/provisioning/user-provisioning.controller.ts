@@ -10,7 +10,7 @@ import { UserProvisioningService } from './services';
 export class UserProvisioningController {
   constructor(private readonly userProvisioningService: UserProvisioningService) {}
 
-  @Post()
+  @Post("access")
   create(@Body() body: CreateUserWithAccessDto) {
     return this.userProvisioningService.provisionUserWithApplications(body);
   }
