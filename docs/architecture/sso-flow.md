@@ -1,5 +1,7 @@
 # Flujo SSO/OAuth
 
+Este documento describe la arquitectura interna del flujo. La fuente principal del contrato publico para Intranet, Gaceta y otros clientes es [client-integration.md](./client-integration.md).
+
 Identity Hub usa OAuth 2.0 Authorization Code con PKCE S256 obligatorio. El navegador conserva una sesion global del Hub con cookie HTTP-only y las aplicaciones cliente reciben tokens JWT firmados con RS256.
 
 ## Actores
@@ -98,7 +100,7 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 | `session:{sessionId}`           | Usuario autenticado del navegador                       | 10h   | Lectura por sesion                                    |
 | `pending_oauth:{authRequestId}` | Request authorize validado y sesion vinculada si existe | 5 min | `GETDEL` al reanudar                                  |
 | `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp   | 5 min | Lectura inicial y compare/delete atomico al completar |
-| `refresh:{refreshToken}`        | `userId`, `clientId`, `credentialVersion` y scope       | 10h   | Lectura inicial y rotacion atomica al completar       |
+| `refresh:{refreshToken}`        | `userId`, `clientId` y `credentialVersion`              | 10h   | Lectura inicial y rotacion atomica al completar       |
 | `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | Actualizacion atomica al emitir o rotar; `DEL` logout |
 
 `GETDEL` evita reuso de requests pendientes. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
@@ -115,41 +117,17 @@ Los authorization codes y refresh tokens no se eliminan durante su lectura inici
 6. Si `mustChangePassword=false`, el Hub consume el pending y reanuda `/oauth/authorize`.
 7. Si `mustChangePassword=true`, conserva y vincula el pending, mantiene la sesion y dirige a la ruta interna de cambio de password.
 8. Un `/oauth/authorize` iniciado con sesion restringida primero valida cliente y callback, guarda el request validado como pending y dirige a la misma ruta interna. No devuelve `access_denied` ni emite code en esta etapa.
-9. `PATCH /api/auth/change-password` actualiza hash y flag en una sola escritura. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home configurado si no existe o ya vencio.
+9. `PATCH /api/auth/change-password` actualiza hash, flag y version de credencial en una transaccion corta. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home configurado si no existe o ya vencio.
 10. Al reanudar, el Hub valida usuario activo, `mustChangePassword=false`, aplicacion activa y asignacion usuario-aplicacion.
 11. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
 12. El backend cliente llama `/oauth/token` con formulario URL-encoded. Los clientes confidenciales usan HTTP Basic; los publicos se identifican con `client_id`.
 13. El Hub lee el code, valida contexto, PKCE y nuevamente la elegibilidad del usuario, prepara el par y finalmente consume el code al persistir el refresh nuevo de forma atomica.
 
-## Token endpoint
+## Emision interna de tokens
 
-`POST /oauth/token` acepta exclusivamente:
-
-```http
-Content-Type: application/x-www-form-urlencoded
-```
-
-Los nombres externos son snake_case y los unicos grants soportados son `authorization_code` y `refresh_token`. No se admite `scope`.
-
-Los clientes confidenciales se autentican exclusivamente mediante HTTP Basic. Para construir el header, el cliente aplica primero la codificacion `application/x-www-form-urlencoded` al identificador y al secreto por separado, une ambos valores codificados con `:` y codifica el resultado UTF-8 en Base64. El servidor realiza el proceso inverso despues de decodificar Base64.
-
-En una solicitud confidencial, `client_id` no es obligatorio en el formulario porque se obtiene de Basic. Puede enviarse opcionalmente, pero debe coincidir. Los clientes publicos no envian Basic y deben incluir `client_id` en el formulario. El campo `client_secret` no se admite en el body: por si solo produce `invalid_client` y combinado con Basic produce `invalid_request`.
-
-Los parametros de formulario desconocidos se ignoran. Los parametros conocidos repetidos, los valores invalidos, las combinaciones ambiguas y la ausencia de parametros requeridos producen `invalid_request`.
+El contrato HTTP, los ejemplos y los errores que implementan los clientes se mantienen solamente en [client-integration.md](./client-integration.md). Esta seccion describe el orden interno que protege las credenciales de un solo uso.
 
 ### Authorization code
-
-Request minimo:
-
-```http
-POST /oauth/token HTTP/1.1
-Content-Type: application/x-www-form-urlencoded
-Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
-
-grant_type=authorization_code&code=...&redirect_uri=https%3A%2F%2Fcliente.example.com%2Fauth%2Fcallback&code_verifier=...
-```
-
-Un cliente publico usa el mismo formulario y agrega `client_id=cliente-publico`, sin header Authorization.
 
 Validaciones:
 
@@ -166,43 +144,11 @@ El code se lee sin eliminarse. Si cualquiera de estas validaciones o la firma JW
 
 ### Refresh token
 
-Request minimo:
-
-```http
-POST /oauth/token HTTP/1.1
-Content-Type: application/x-www-form-urlencoded
-Authorization: Basic Y2xpZW50ZS1vYXV0aDppZGhfc2tfLi4u
-
-grant_type=refresh_token&refresh_token=...
-```
-
-Un cliente publico agrega `client_id=cliente-publico` al formulario, sin header Authorization.
-
 El refresh se lee sin eliminarse. Primero se valida que pertenezca al cliente y se carga desde PostgreSQL el usuario elegible junto con su `credentialVersion`. El valor persistido en el refresh debe existir y coincidir exactamente con la version actual del usuario; un token antiguo sin este campo o con otra version produce `invalid_grant`. No existe una consulta adicional ni una cache de esta version. Despues se firma el access token y se prepara un refresh nuevo con la misma version actual. Un script Lua compara el payload exacto leido y, solo si coincide, elimina el refresh anterior, persiste el nuevo, retira el token anterior de `user_refresh_tokens:{userId}`, agrega el nuevo y renueva el TTL del indice a 10 horas.
 
 El refresh anterior no puede reutilizarse y no existe periodo de gracia. Ante dos refresh simultaneos, ambos pueden completar las validaciones, pero solo el primer script encuentra el valor esperado. El ganador persiste y devuelve su par; el perdedor recibe `invalid_grant` sin eliminar ni modificar el token generado por el ganador. Un token presentado con otro cliente o que falla las validaciones no se consume.
 
 Los fallos de PostgreSQL, firma o Redis anteriores a la operacion final no consumen la credencial y conservan su naturaleza interna 500/503. Puede permanecer la ventana inevitable de un fallo de red despues de que Redis haya confirmado internamente el script pero antes de que el backend reciba la respuesta: el servidor no puede saber si la operacion se completo. Resolver esa ambiguedad requeriria idempotencia o estado adicional, fuera de esta fase.
-
-### Respuesta exitosa
-
-```http
-HTTP/1.1 200 OK
-Cache-Control: no-store
-Pragma: no-cache
-```
-
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "token_type": "Bearer",
-  "expires_in": 600,
-  "refresh_token_expires_in": 36000
-}
-```
-
-`refresh_token_expires_in` es una extension propia de Identity Hub. La respuesta no incluye aliases camelCase ni `scope`.
 
 `credentialVersion` es un entero interno del usuario que comienza en `0` y cambia cuando cambia o se invalida su credencial. Se incrementa en el reset administrativo, al completar cualquier accion de configuracion/reset y en el cambio autenticado. No cambia al solicitar recuperacion, regenerar una accion ni intentar su entrega. El reset puede incrementarla una vez al invalidar la password anterior y otra vez cuando el usuario establece la definitiva.
 
@@ -230,18 +176,22 @@ El access token es un JWT RS256.
 
 Claims/headers relevantes:
 
-| Campo         | Valor                                  |
-| ------------- | -------------------------------------- |
-| `alg`         | `RS256`                                |
-| `kid`         | `main-key`                             |
-| `iss`         | `JWT_ISSUER`                           |
-| `aud`         | `clientId`                             |
-| `sub`         | id interno del usuario en Identity Hub |
-| `externalKey` | identificador estable para clientes    |
-| `name`        | nombre completo                        |
-| `exp`         | expiracion                             |
+| Campo         | Valor                                                    |
+| ------------- | -------------------------------------------------------- |
+| `alg`         | `RS256`                                                  |
+| `kid`         | `main-key`                                               |
+| `iss`         | `JWT_ISSUER`                                             |
+| `aud`         | `clientId` usado como audiencia                          |
+| `sub`         | id interno del usuario en Identity Hub                   |
+| `externalKey` | identificador estable para clientes                      |
+| `name`        | nombre completo mutable                                  |
+| `clientId`    | campo redundante del payload; los clientes validan `aud` |
+| `iat`         | instante de emision agregado por la biblioteca JWT       |
+| `exp`         | expiracion agregada por la biblioteca JWT                |
 
 Los clientes deben validar firma con JWKS, `iss`, `aud` y expiracion.
+
+El access token no contiene `nbf`, `scope`, roles, email, `mustChangePassword` ni `credentialVersion`.
 
 ## JWKS
 
@@ -259,15 +209,6 @@ La llave privada no debe estar en el repositorio. Para rotacion futura se recomi
 
 Despues del logout, un nuevo `/oauth/authorize` debe requerir login nuevamente.
 
-## Contrato minimo para aplicaciones cliente
+## Contrato para aplicaciones cliente
 
-Cada aplicacion cliente debe:
-
-- registrar una o mas `redirectUris` exactas;
-- generar y guardar `state` por intento de login;
-- usar PKCE S256;
-- canjear el code desde backend, no desde navegador publico si el cliente es confidencial;
-- validar JWT con JWKS, `iss`, `aud`, `exp` y firma RS256;
-- usar `externalKey` como identificador estable de usuario integrado;
-- manejar errores `access_denied`, code expirado, refresh expirado y refresh rotado;
-- no asumir roles internos desde Identity Hub.
+Las obligaciones, ejemplos y manejo de errores para Intranet, Gaceta y otros clientes se mantienen en [client-integration.md](./client-integration.md). Este documento no redefine ese contrato publico.

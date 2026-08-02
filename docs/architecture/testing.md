@@ -1,89 +1,45 @@
 # Pruebas y validaciones
 
-El proyecto conserva pruebas unitarias/de integracion en `src/**/*.spec.ts`.
+El repositorio no contiene actualmente archivos `*.spec.ts`. Esta ausencia es conocida y no se corrige creando pruebas durante el cierre documental de las fases OAuth y password.
 
-## Suites actuales
+## Comandos actuales
 
-| Archivo                                                      | Enfoque                                                                             |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `src/modules/auth/services/oauth.service.spec.ts`            | Casos focalizados de OAuthService, DTOs y PKCE                                      |
-| `src/modules/auth/services/identity-hub.integration.spec.ts` | Flujo SSO/OAuth completo con servicios reales, repositorios fake y Redis en memoria |
+- `npm run test` invoca Jest y termina con `No tests found` mientras no existan suites.
+- `npm run test:e2e` apunta a `identity-hub.integration.spec.ts`, que no existe actualmente.
+- Build, type-check, ESLint, Prettier y `git diff --check` son las verificaciones automatizadas disponibles en el estado actual.
 
-`npm run test` ejecuta todas las suites.
+No debe describirse ninguna suite como integracion real: actualmente no hay pruebas que levanten HTTP, PostgreSQL o Redis, ni suites con dobles en memoria.
 
-`npm run test:e2e` ejecuta la suite de integracion del Identity Hub. No levanta una app HTTP completa ni usa Postgres/Redis reales.
+## Validaciones de integracion pendientes
 
-## Cobertura conservada
+Antes de produccion conviene automatizar, sin cambiar el contrato funcional:
 
-Las pruebas cubren:
+- authorize sin sesion, login y callback con el mismo `state`;
+- PKCE S256 obligatorio, verifier incorrecto y code reutilizado o vencido;
+- canje y refresh mediante formulario URL-encoded y HTTP Basic;
+- un solo ganador al canjear un code o rotar un refresh concurrentemente;
+- usuario inactivo, `mustChangePassword`, aplicacion inactiva y asignacion revocada;
+- invalidacion de refresh por cambio de `credentialVersion`;
+- sesion central, reanudacion de authorize y logout;
+- JWKS, firma RS256, `iss`, `aud`, `exp` y `kid`;
+- configuracion inicial, reset, recuperacion y consumo unico de acciones de password;
+- rate limiting de login, token, recuperacion, consumo de acciones y `/internal/*`;
+- transacciones y restricciones contra PostgreSQL real;
+- TTL y scripts atomicos contra Redis real.
 
-- authorize sin sesion crea flujo pendiente;
-- login exitoso reanuda el flujo;
-- usuario inactivo no inicia sesion;
-- usuario sin acceso no recibe authorization code;
-- aplicacion inactiva no inicia flujo;
-- `redirect_uri` invalida no redirige a URL no registrada;
-- `state` ausente falla en validacion;
-- `response_type` distinto de `code` falla;
-- `client_id` invalido falla;
-- `scope` invalido falla porque no hay soporte real de scopes;
-- PKCE obligatorio con `S256`;
-- `plain` rechazado;
-- `code_verifier` faltante o incorrecto falla;
-- code valido emite tokens;
-- authorization code de un solo uso;
-- code expirado;
-- code con otro `redirect_uri` o `clientId`;
-- access token RS256 con `issuer`, `audience`, `subject`, expiracion y `kid`;
-- JWKS con llave publica;
-- refresh token rotativo;
-- refresh token anterior o invalido falla;
-- logout elimina sesion y revoca refresh tokens;
-- endpoints internos con Basic Auth;
-- respuesta segura de usuarios asignables.
+## Validaciones manuales para Intranet y Gaceta
 
-## Lo que no cubren
+1. Registrar la aplicacion, su callback exacto y un usuario asignado.
+2. Implementar el contrato de [client-integration.md](./client-integration.md).
+3. Verificar callback valido, `state`, PKCE y canje server-to-server.
+4. Validar el JWT contra JWKS y la audiencia propia.
+5. Rotar el refresh y comprobar que el anterior ya no funciona.
+6. Probar code/refresh vencido, consumido e invalidado por cambio de credencial.
+7. Separar `invalid_grant` de fallos transitorios 500/503.
+8. Verificar logout local y, si corresponde, logout de la sesion central.
 
-Las pruebas actuales no validan:
+## Validacion del esquema
 
-- una app Nest HTTP completa con Supertest;
-- `ValidationPipe` global desde requests HTTP reales;
-- CORS real;
-- cookie transport real en navegador;
-- throttling real por IP;
-- Redis real y expiraciones reales;
-- Postgres real;
-- migraciones contra una base real dentro del test runner;
-- ServeStaticModule sirviendo Angular.
+La fase actual no agrega migraciones. En desarrollo se recrea la base con `DB_SYNCHRONIZE=true` y se limpia Redis para descartar refresh tokens sin `credentialVersion`.
 
-Estas validaciones deben ejecutarse manualmente o en una suite de infraestructura dedicada.
-
-## Validacion de migraciones
-
-Para validar una base limpia sin usar bootstrap:
-
-1. Crear una base temporal.
-2. Exportar variables `DATABASE_*` hacia esa base.
-3. Configurar `DB_SYNCHRONIZE=false`.
-4. Ejecutar `npm run migration:run`.
-5. Confirmar que existen `applications`, `user`, `user_applications` y `migrations`.
-6. Eliminar la base temporal.
-
-## Validaciones manuales con aplicaciones cliente
-
-1. Registrar la aplicacion desde el panel del Hub.
-2. Registrar `redirect_uri` exacta.
-3. Guardar el `clientSecret` si la app es confidencial.
-4. Asignar un usuario activo a la aplicacion.
-5. Iniciar `/oauth/authorize` sin sesion y verificar redirect a login.
-6. Hacer login y verificar callback con `code` y mismo `state`.
-7. Canjear code con `code_verifier` correcto.
-8. Validar JWT contra JWKS, `iss`, `aud`, `exp` y firma RS256.
-9. Probar `redirect_uri` invalida, `state` ausente, PKCE incorrecto y code reutilizado.
-10. Probar refresh rotation: el refresh anterior debe fallar.
-11. Probar logout: la sesion se borra y el refresh queda revocado.
-12. Probar `/internal/users/assignable` sin Basic Auth, con secreto invalido, app inactiva y app valida.
-
-## Recomendacion futura
-
-Agregar una suite separada de infraestructura con Postgres y Redis reales, idealmente usando contenedores dedicados para tests. Esa suite debe seguir sin ejecutar `bootstrap:run` salvo que el setup de pruebas lo controle explicitamente.
+Antes de usar `DB_SYNCHRONIZE=false` sobre una base persistente debe generarse y validarse la migracion de `password_action_tokens`, `User.credentialVersion` y los demas cambios de entidad posteriores a la migracion inicial.

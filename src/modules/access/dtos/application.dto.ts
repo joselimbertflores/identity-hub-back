@@ -1,5 +1,16 @@
 import { OmitType, PartialType } from '@nestjs/mapped-types';
-import { ArrayNotEmpty, ArrayUnique, IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString, IsUrl, Matches, MaxLength } from 'class-validator';
+import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateApplicationDto {
   @IsString()

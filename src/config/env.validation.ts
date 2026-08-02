@@ -1,6 +1,5 @@
 import { plainToInstance, Type } from 'class-transformer';
 import {
-  IsBoolean,
   IsEmail,
   IsIn,
   IsInt,
@@ -49,8 +48,8 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   JWT_PRIVATE_KEY_PATH: string;
 
-  @IsBoolean()
-  IDENTITY_COOKIE_SECURE: boolean;
+  @IsIn(['true', 'false'])
+  IDENTITY_COOKIE_SECURE: 'true' | 'false';
 
   @IsOptional()
   @IsUrl({ require_tld: false })
@@ -80,13 +79,13 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(900)
   @Max(604800)
-   @Type(() => Number) 
+  @Type(() => Number)
   PASSWORD_INITIAL_SETUP_TTL_SECONDS = 24 * 60 * 60;
 
   @IsInt()
   @Min(300)
   @Max(86400)
-   @Type(() => Number) 
+  @Type(() => Number)
   PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 
   @IsString()

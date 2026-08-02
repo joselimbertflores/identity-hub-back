@@ -52,7 +52,7 @@ export class AuthController {
     @Cookies(SESSION_COOKIE_NAME) sessionId: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const cookieSecure = this.configService.getOrThrow<boolean>('IDENTITY_COOKIE_SECURE');
+    const cookieSecure = this.configService.getOrThrow<string>('IDENTITY_COOKIE_SECURE') === 'true';
     const result = await this.authService.removeAuthSession(sessionId);
     response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure));
     return result;

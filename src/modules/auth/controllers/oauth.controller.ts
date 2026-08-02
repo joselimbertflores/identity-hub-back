@@ -58,7 +58,7 @@ export class OAuthController {
   @Throttle({ default: { ttl: RATE_LIMIT_TTL_MS, limit: RATE_LIMITS.LOGIN } })
   @Post('login')
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
-    const secure = this.configService.getOrThrow<boolean>('IDENTITY_COOKIE_SECURE');
+    const secure = this.configService.getOrThrow<string>('IDENTITY_COOKIE_SECURE') === 'true';
 
     try {
       const { sessionId, mustChangePassword } = await this.oauthService.authenticateAndCreateSession(body);

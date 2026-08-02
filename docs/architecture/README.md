@@ -21,8 +21,8 @@ Identity Hub no administra roles internos de las aplicaciones cliente. Cada clie
 | Documento                                        | Contenido                                                                     |
 | ------------------------------------------------ | ----------------------------------------------------------------------------- |
 | [backend-modules.md](./backend-modules.md)       | Modulos NestJS, responsabilidades y dependencias                              |
-| [sso-flow.md](./sso-flow.md)                     | Flujo completo de login, sesion, OAuth, PKCE, tokens y logout                 |
-| [client-integration.md](./client-integration.md) | Guia practica para integrar clientes OAuth confidenciales                     |
+| [client-integration.md](./client-integration.md) | Fuente principal del contrato publico para aplicaciones cliente               |
+| [sso-flow.md](./sso-flow.md)                     | Arquitectura interna de login, sesion, OAuth, PKCE, tokens y logout           |
 | [oauth-errors.md](./oauth-errors.md)             | Donde se devuelven errores y por que no se redirige a callbacks no confiables |
 | [client-user-import.md](./client-user-import.md) | Endpoints internos `/internal/*` para clientes                                |
 | [provisioning-flow.md](./provisioning-flow.md)   | Alta, reset, recuperacion y acciones de password de un solo uso               |
@@ -31,9 +31,9 @@ Identity Hub no administra roles internos de las aplicaciones cliente. Cada clie
 
 ## Lectura recomendada
 
-1. Leer [backend-modules.md](./backend-modules.md) para entender limites de responsabilidad.
-2. Leer [sso-flow.md](./sso-flow.md) antes de integrar un cliente OAuth.
-3. Leer [client-integration.md](./client-integration.md) para implementar el contrato en una aplicacion cliente.
+1. Leer [client-integration.md](./client-integration.md) para implementar Intranet, Gaceta u otro cliente OAuth.
+2. Leer [backend-modules.md](./backend-modules.md) para entender limites de responsabilidad interna.
+3. Leer [sso-flow.md](./sso-flow.md) para entender la implementacion interna del flujo.
 4. Leer [environment.md](./environment.md) antes de levantar staging o produccion.
 5. Leer [client-user-import.md](./client-user-import.md) si una aplicacion necesita importar usuarios asignados.
 6. Leer [testing.md](./testing.md) para saber que esta cubierto y que debe probarse manualmente.

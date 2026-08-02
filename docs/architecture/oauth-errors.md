@@ -1,5 +1,7 @@
 # Manejo de errores OAuth
 
+Este documento explica decisiones internas de manejo de errores. El contrato que deben implementar las aplicaciones cliente se mantiene en [client-integration.md](./client-integration.md).
+
 La regla principal es no redirigir nunca a una `redirect_uri` que no haya sido validada contra la aplicacion registrada.
 
 ## Matriz
@@ -53,30 +55,7 @@ Con credenciales validas y `mustChangePassword=true`, el login crea la sesion ce
 
 ## Token
 
-`POST /oauth/token` es backend-to-backend, recibe `application/x-www-form-urlencoded` y nunca usa redirects. Sus errores OAuth tienen exclusivamente este shape:
-
-```json
-{
-  "error": "invalid_grant",
-  "error_description": "The authorization grant is invalid or expired."
-}
-```
-
-No se agregan `message`, `statusCode` ni el nombre de una excepcion NestJS.
-
-| Codigo                   | HTTP | Descripcion segura                                                   | Uso actual                                                                                                                                                              |
-| ------------------------ | ---- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid_request`        | 400  | `The token request is invalid.`                                      | Content-Type incorrect, parametros ausentes o repetidos, valores invalidos, grants mezclados, Basic junto con `client_secret` o estructura invalida                     |
-| `invalid_client`         | 401  | `Client authentication failed.`                                      | Cliente inexistente/inactivo, Basic mal formado, identificadores distintos, secreto ausente/incorrecto, `client_secret` solo en body o mecanismo no valido para el tipo |
-| `invalid_grant`          | 400  | `The authorization grant is invalid or expired.`                     | Code, callback, PKCE o refresh invalido; cliente del grant incorrecto; usuario, aplicacion, asignacion o `mustChangePassword` ya no elegible                            |
-| `unauthorized_client`    | 400  | `The authenticated client is not authorized to use this grant type.` | Reservado para una politica real que impida a un cliente valido usar un grant. La implementacion actual no tiene esa politica y no lo devuelve                          |
-| `unsupported_grant_type` | 400  | `The authorization grant type is not supported.`                     | Cualquier `grant_type` distinto de `authorization_code` y `refresh_token`                                                                                               |
-
-Toda respuesta `invalid_client` incluye:
-
-```http
-WWW-Authenticate: Basic
-```
+Los status, bodies, headers y acciones que debe implementar una aplicacion cliente se mantienen en la seccion de errores de [client-integration.md](./client-integration.md). Internamente, el endpoint normaliza solo sus errores OAuth previstos; no agrega el shape ordinario de excepciones NestJS ni usa redirects.
 
 `invalid_grant` agrupa deliberadamente code inexistente, vencido o consumido; redirect incorrecto; PKCE invalido; refresh inexistente, revocado, consumido o de otro cliente; usuario inactivo o inexistente; perdida de asignacion; aplicacion ya no valida y `mustChangePassword=true`. El cliente no puede distinguir la causa interna.
 
