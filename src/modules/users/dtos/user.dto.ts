@@ -1,5 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import type { TransformFnParams } from 'class-transformer';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { UserRole } from '../entities';
 
 export class CreateUserDto {
@@ -15,6 +17,16 @@ export class CreateUserDto {
   @IsString()
   @IsOptional()
   relationKey?: string;
+
+  @Transform(({ value }: TransformFnParams) => {
+    const input = value as unknown;
+    if (input === undefined) return undefined;
+    if (input === null || (typeof input === 'string' && !input.trim())) return null;
+    return typeof input === 'string' ? input.trim().toLowerCase() : input;
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string | null;
 
   @IsOptional()
   @IsArray()

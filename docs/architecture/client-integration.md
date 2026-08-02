@@ -46,7 +46,7 @@ http://10.10.20.15/auth/callback
 4. El backend cliente calcula `code_challenge = base64url(sha256(code_verifier))`.
 5. El backend cliente guarda `state` y `code_verifier` en sesion server-side o storage temporal seguro.
 6. El backend cliente redirige el navegador a `/oauth/authorize`.
-7. Identity Hub autentica al usuario si no tiene sesion global. Una password temporal crea una sesion restringida y pausa el flujo hasta que el usuario la cambie.
+7. Identity Hub autentica al usuario si no tiene sesion global. Si una cuenta con credenciales validas tiene `mustChangePassword=true`, crea una sesion restringida y pausa el flujo hasta que el usuario cambie la password.
 8. Identity Hub conserva internamente el authorize validado durante esa pausa; el cliente no recibe callback ni code todavia.
 9. Identity Hub valida acceso y devuelve `code` y `state` al callback registrado cuando `mustChangePassword=false`.
 10. El backend cliente valida que el `state` recibido coincida con el guardado.
@@ -231,7 +231,7 @@ Un cliente publico agrega `client_id=cliente-publico` al formulario y no envia A
 
 ## Logout
 
-`POST /auth/logout` cierra la sesion global del Hub y revoca refresh tokens indexados para el usuario.
+`POST /api/auth/logout` cierra la sesion global del Hub y revoca refresh tokens indexados para el usuario.
 
 La aplicacion cliente tambien debe cerrar su propia sesion local.
 
@@ -249,7 +249,7 @@ Identity Hub no implementa logout federado hacia todos los clientes. Si el usuar
 | `unsupported_grant_type`    | `grant_type` no soportado                                 | Usar code o refresh                 |
 | `access_denied`             | Usuario sin asignacion a la aplicacion                    | Asignar usuario desde el panel      |
 | Refresh invalido            | Token vencido, rotado o revocado por logout               | Reiniciar login                     |
-| Grant rechazado tras reset  | El usuario debe cambiar su password en Identity Hub       | Reiniciar authorize en el navegador |
+| Grant rechazado tras reset  | El usuario debe completar el reset y volver al login      | Reiniciar authorize en el navegador |
 | JWT con `aud` incorrecto    | Token emitido para otro cliente                           | Rechazar token                      |
 
 ## Checklist de integracion

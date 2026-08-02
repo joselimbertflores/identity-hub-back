@@ -4,5 +4,7 @@ export const RATE_LIMITS = {
   DEFAULT: 60,
   LOGIN: 10,
   TOKEN: 30,
+  PASSWORD_RECOVERY: 5,
+  PASSWORD_ACTION: 10,
   INTERNAL: 120,
 } as const;

@@ -6,11 +6,10 @@ El backend se organiza por capacidades funcionales. Cada modulo NestJS agrupa re
 
 | Modulo               | Responsabilidad                                                                       | No debe hacer                                       |
 | -------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `AuthModule`         | Login, sesion global, guards, OAuth, PKCE, JWT, JWKS, refresh tokens y logout         | Administrar CRUD general de usuarios o aplicaciones |
+| `AuthModule`         | Login, sesion, OAuth, tokens y acciones acotadas de password                          | Administrar CRUD general de usuarios o aplicaciones |
 | `UsersModule`        | Usuarios centrales, credenciales, busqueda administrativa y directorio interno seguro | Administrar roles internos de clientes              |
 | `AccessModule`       | Aplicaciones cliente, secretos, portal de acceso y asignacion usuario-aplicacion      | Autenticar usuarios finales o emitir tokens         |
-| `ProvisioningModule` | Orquestar alta/actualizacion de usuarios con aplicaciones y credenciales temporales   | Reemplazar reglas internas de Users o Access        |
-| `PrinterModule`      | Generar PDF desde definiciones recibidas                                              | Conocer reglas de OAuth, usuarios o aplicaciones    |
+| `ProvisioningModule` | Orquestar alta/reset de usuarios, aplicaciones y entrega de acciones de password      | Reemplazar reglas internas de Users, Access o Auth  |
 | `common`             | DTOs y constantes transversales simples                                               | Acumular logica de dominio                          |
 
 ## Dependencias
@@ -20,8 +19,7 @@ AppModule
 |-- AuthModule
 |-- UsersModule
 |-- AccessModule
-|-- ProvisioningModule
-`-- PrinterModule
+`-- ProvisioningModule
 ```
 
 `ProvisioningModule` coordina:
@@ -30,7 +28,7 @@ AppModule
 ProvisioningModule
 |-- UsersModule
 |-- AccessModule
-`-- PrinterModule
+`-- AuthModule
 ```
 
 `UsersModule` importa `AccessModule` para proteger `/internal/users/*` con credenciales de aplicacion. `AccessModule` no importa `UsersModule`, por lo que no hay dependencia circular.
@@ -40,8 +38,11 @@ ProvisioningModule
 - `OAuthService` ejecuta el flujo Authorization Code y delega PKCE en `PkceService`.
 - `TokenService` emite access tokens y administra refresh tokens rotativos en Redis.
 - `AuthService` autentica usuarios, crea sesiones y revoca refresh tokens en logout.
+- `PasswordActionService` emite y consume acciones de configuracion/reset en PostgreSQL.
+- `MailService` encapsula solamente transporte SMTP y plantillas basicas de password.
 - `ApplicationClientAuthService` valida Basic Auth para endpoints internos.
 - `UserApplicationsService` sincroniza asignaciones usuario-aplicacion dentro de transacciones de provisioning.
+- `UserProvisioningService` coordina usuario, asignaciones y accion en una transaccion; la entrega se intenta despues del commit.
 
 ## Reglas de mantenimiento
 
@@ -50,3 +51,4 @@ ProvisioningModule
 - No mezclar Basic Auth interno con OAuth de usuarios finales.
 - No registrar aplicaciones cliente desde variables de entorno.
 - No exponer hashes, passwords, refresh tokens, authorization codes, secretos ni `code_verifier` en logs.
+- No persistir ni volver a consultar el codigo real de una accion de password; solo se almacena su SHA-256.

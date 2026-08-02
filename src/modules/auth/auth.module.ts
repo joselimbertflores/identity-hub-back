@@ -2,8 +2,17 @@ import { APP_GUARD } from '@nestjs/core';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { AuthService, JwksService, OAuthService, PkceService, TokenService } from './services';
+import {
+  AuthService,
+  JwksService,
+  MailService,
+  OAuthService,
+  PasswordActionService,
+  PkceService,
+  TokenService,
+} from './services';
 import { OAuthController, AuthController, JwksController } from './controllers';
 import { readJwtKey } from './config/jwt.config';
 import { OAUTH_JWT_KEY_ID } from './constants/oauth.constants';
@@ -12,6 +21,7 @@ import { AccessModule } from '../access/access.module';
 import { SessionGuard } from './guards/session.guard';
 import { PasswordChangeGuard } from './guards';
 import { EnvironmentVariables } from 'src/config/env.validation';
+import { PasswordActionToken } from './entities';
 
 @Module({
   controllers: [OAuthController, AuthController, JwksController],
@@ -19,6 +29,8 @@ import { EnvironmentVariables } from 'src/config/env.validation';
     AuthService,
     OAuthService,
     TokenService,
+    MailService,
+    PasswordActionService,
     JwksService,
     PkceService,
     {
@@ -47,6 +59,8 @@ import { EnvironmentVariables } from 'src/config/env.validation';
     }),
     UsersModule,
     AccessModule,
+    TypeOrmModule.forFeature([PasswordActionToken]),
   ],
+  exports: [MailService, PasswordActionService, TokenService],
 })
 export class AuthModule {}

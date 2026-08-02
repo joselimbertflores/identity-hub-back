@@ -10,6 +10,7 @@ export class AccessTokenPayload {
 export class RefreshTokenPayload {
   userId: string;
   clientId: string;
+  credentialVersion: number;
   scope?: string;
 }
 

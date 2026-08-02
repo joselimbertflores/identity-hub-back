@@ -164,12 +164,15 @@ export class OAuthService {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    const preparedTokenPair = await this.tokenService.prepareTokenPair({
-      sub: user.id,
-      externalKey: user.externalKey,
-      name: user.fullName,
-      clientId: context.clientId,
-    });
+    const preparedTokenPair = await this.tokenService.prepareTokenPair(
+      {
+        sub: user.id,
+        externalKey: user.externalKey,
+        name: user.fullName,
+        clientId: context.clientId,
+      },
+      user.credentialVersion,
+    );
 
     const completed = await this.tokenService.completeAuthorizationCodeGrant(dto.code!, raw, preparedTokenPair);
     if (!completed) {
@@ -200,12 +203,19 @@ export class OAuthService {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    const preparedTokenPair = await this.tokenService.prepareTokenPair({
-      sub: user.id,
-      name: user.fullName,
-      externalKey: user.externalKey,
-      clientId: data.clientId,
-    });
+    if (!Number.isInteger(data.credentialVersion) || data.credentialVersion !== user.credentialVersion) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
+
+    const preparedTokenPair = await this.tokenService.prepareTokenPair(
+      {
+        sub: user.id,
+        name: user.fullName,
+        externalKey: user.externalKey,
+        clientId: data.clientId,
+      },
+      user.credentialVersion,
+    );
 
     const rotated = await this.tokenService.rotateRefreshToken(
       dto.refreshToken,

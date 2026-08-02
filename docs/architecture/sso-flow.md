@@ -11,19 +11,21 @@ Identity Hub usa OAuth 2.0 Authorization Code con PKCE S256 obligatorio. El nave
 | Identity Hub API   | Valida clientes, usuarios, acceso, PKCE, emite codes/tokens y publica JWKS |
 | Aplicacion cliente | Inicia `/oauth/authorize`, guarda `state`, genera PKCE y canjea el code    |
 | Redis              | Guarda estado efimero del flujo                                            |
-| PostgreSQL         | Guarda usuarios, aplicaciones y asignaciones                               |
+| PostgreSQL         | Guarda usuarios, aplicaciones, asignaciones y acciones de password         |
 
 ## Endpoints principales
 
-| Metodo  | Ruta                     | Uso                                          |
-| ------- | ------------------------ | -------------------------------------------- |
-| `GET`   | `/oauth/authorize`       | Inicio o continuacion del Authorization Code |
-| `POST`  | `/oauth/login`           | Login del usuario en la UI del Hub           |
-| `POST`  | `/oauth/token`           | Canje de authorization code o refresh token  |
-| `POST`  | `/auth/logout`           | Logout global del Hub                        |
-| `GET`   | `/.well-known/jwks.json` | Llaves publicas para validar JWT             |
-| `GET`   | `/auth/status`           | Usuario autenticado actual para la UI        |
-| `PATCH` | `/auth/change-password`  | Cambio de password cuando corresponde        |
+| Metodo  | Ruta                                  | Uso                                          |
+| ------- | ------------------------------------- | -------------------------------------------- |
+| `GET`   | `/oauth/authorize`                    | Inicio o continuacion del Authorization Code |
+| `POST`  | `/oauth/login`                        | Login del usuario en la UI del Hub           |
+| `POST`  | `/oauth/token`                        | Canje de authorization code o refresh token  |
+| `POST`  | `/api/auth/logout`                    | Logout global del Hub                        |
+| `GET`   | `/.well-known/jwks.json`              | Llaves publicas para validar JWT             |
+| `GET`   | `/api/auth/status`                    | Usuario autenticado actual para la UI        |
+| `PATCH` | `/api/auth/change-password`           | Cambio autenticado con password actual       |
+| `POST`  | `/api/auth/forgot-password`           | Solicitud publica de recuperacion            |
+| `POST`  | `/api/auth/password-actions/complete` | Configuracion/reset por codigo               |
 
 `/oauth/*`, `/.well-known/*` y `/internal/*` no usan el prefijo global `/api`.
 
@@ -83,7 +85,9 @@ Cookie:
 
 Si no hay sesion, el Hub crea un request pendiente en Redis y redirige a la UI de login.
 
-Las credenciales validas siempre pueden crear una sesion central. Si `mustChangePassword=true`, esa sesion queda restringida: permite consultar `/api/auth/status`, cambiar la password y cerrar sesion, pero los endpoints normales siguen bloqueados por `PasswordChangeGuard`. `/api/auth/status` incluye `mustChangePassword` dentro del usuario autenticado y no expone el hash ni datos de credenciales.
+Las credenciales validas siempre pueden crear una sesion central. Si `mustChangePassword=true`, esa sesion queda restringida: permite consultar `/api/auth/status`, cambiar la password con la password actual y cerrar sesion, pero los endpoints normales siguen bloqueados por `PasswordChangeGuard`. `/api/auth/status` incluye `mustChangePassword` dentro del usuario autenticado y no expone el hash ni datos de credenciales.
+
+Las altas y resets administrativos ya no entregan una password temporal conocida. Esos usuarios establecen su password mediante una accion publica de un solo uso y luego entran por el login normal. El flujo de sesion restringida se conserva para cualquier usuario que tenga credenciales validas mientras `mustChangePassword=true`, incluido el bootstrap controlado.
 
 La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` y se resuelve contra `IDENTITY_HUB_UI_BASE_URL`. No es un callback OAuth y el navegador no puede sustituirla mediante `returnUrl` o `redirect_uri`.
 
@@ -94,7 +98,7 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 | `session:{sessionId}`           | Usuario autenticado del navegador                       | 10h   | Lectura por sesion                                    |
 | `pending_oauth:{authRequestId}` | Request authorize validado y sesion vinculada si existe | 5 min | `GETDEL` al reanudar                                  |
 | `auth_code:{code}`              | `userId`, `clientId`, `redirectUri`, PKCE y timestamp   | 5 min | Lectura inicial y compare/delete atomico al completar |
-| `refresh:{refreshToken}`        | `userId`, `clientId` y scope si existiera               | 10h   | Lectura inicial y rotacion atomica al completar       |
+| `refresh:{refreshToken}`        | `userId`, `clientId`, `credentialVersion` y scope       | 10h   | Lectura inicial y rotacion atomica al completar       |
 | `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | Actualizacion atomica al emitir o rotar; `DEL` logout |
 
 `GETDEL` evita reuso de requests pendientes. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
@@ -174,7 +178,7 @@ grant_type=refresh_token&refresh_token=...
 
 Un cliente publico agrega `client_id=cliente-publico` al formulario, sin header Authorization.
 
-El refresh se lee sin eliminarse. Primero se valida que pertenezca al cliente y que sigan vigentes el usuario, la aplicacion, la asignacion y `mustChangePassword=false`; despues se firma el access token y se prepara un refresh nuevo en memoria. Un script Lua compara el payload exacto leido y, solo si coincide, elimina el refresh anterior, persiste el nuevo, retira el token anterior de `user_refresh_tokens:{userId}`, agrega el nuevo y renueva el TTL del indice a 10 horas.
+El refresh se lee sin eliminarse. Primero se valida que pertenezca al cliente y se carga desde PostgreSQL el usuario elegible junto con su `credentialVersion`. El valor persistido en el refresh debe existir y coincidir exactamente con la version actual del usuario; un token antiguo sin este campo o con otra version produce `invalid_grant`. No existe una consulta adicional ni una cache de esta version. Despues se firma el access token y se prepara un refresh nuevo con la misma version actual. Un script Lua compara el payload exacto leido y, solo si coincide, elimina el refresh anterior, persiste el nuevo, retira el token anterior de `user_refresh_tokens:{userId}`, agrega el nuevo y renueva el TTL del indice a 10 horas.
 
 El refresh anterior no puede reutilizarse y no existe periodo de gracia. Ante dos refresh simultaneos, ambos pueden completar las validaciones, pero solo el primer script encuentra el valor esperado. El ganador persiste y devuelve su par; el perdedor recibe `invalid_grant` sin eliminar ni modificar el token generado por el ganador. Un token presentado con otro cliente o que falla las validaciones no se consume.
 
@@ -200,17 +204,25 @@ Pragma: no-cache
 
 `refresh_token_expires_in` es una extension propia de Identity Hub. La respuesta no incluye aliases camelCase ni `scope`.
 
-Un reset administrativo establece `mustChangePassword=true`. Los authorization codes y refresh tokens presentados desde ese momento no producen tokens nuevos. Los access tokens JWT ya emitidos siguen siendo validos hasta su expiracion; no existe blacklist en esta fase. Tras cambiar correctamente la password, el usuario puede iniciar o reanudar autorizaciones nuevas.
+`credentialVersion` es un entero interno del usuario que comienza en `0` y cambia cuando cambia o se invalida su credencial. Se incrementa en el reset administrativo, al completar cualquier accion de configuracion/reset y en el cambio autenticado. No cambia al solicitar recuperacion, regenerar una accion ni intentar su entrega. El reset puede incrementarla una vez al invalidar la password anterior y otra vez cuando el usuario establece la definitiva.
+
+Un reset administrativo establece `mustChangePassword=true`, incrementa `credentialVersion` y emite una accion `PASSWORD_RESET`; nunca devuelve una password. Los authorization codes presentados desde ese momento tampoco producen tokens nuevos. Los access tokens JWT ya emitidos siguen siendo validos hasta su expiracion; no existe blacklist en esta fase.
+
+Completar una accion publica cambia la password, limpia el flag, incrementa `credentialVersion` y elimina el codigo dentro de una sola transaccion PostgreSQL. No crea sesion ni emite tokens, por lo que el usuario continua al login normal. El cambio autenticado conserva la sesion y puede reanudar el authorize pendiente conforme a la fase anterior.
+
+Despues de confirmar un cambio de credencial, Redis se limpia como best effort. Si la eliminacion fisica falla, se registra solamente un mensaje reducido y la operacion principal sigue siendo exitosa: cualquier refresh anterior permanece inutilizable porque su version ya no coincide con PostgreSQL y desaparecera por TTL.
 
 ## Contrato de redireccion del Hub
 
 - `IDENTITY_HUB_UI_BASE_URL` identifica el origen publico donde vive la UI del Hub.
 - `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` es una ruta relativa configurada, sin host, query ni fragmento.
+- `PASSWORD_ACTION_UI_PATH` es la ruta publica interna que recibe el codigo de configuracion/reset.
 - En desarrollo con UI separada, la base apunta al origen de Angular y se habilita `CORS_ORIGIN` con credenciales.
 - En produccion de mismo origen, la base apunta al origen publico del backend que sirve `public/browser`.
 - `/login`, la ruta de cambio, `/home/welcome` y `/auth/error` son rutas internas del Hub.
 - `Application.redirectUris` contiene callbacks externos registrados y solo se usa despues de validacion exacta.
 - La UI debe conservar `auth_request_id`, enviarlo como query en `PATCH /api/auth/change-password` y navegar al `redirectUrl` de la respuesta. No debe enviar un `returnUrl`.
+- La UI de `PASSWORD_ACTION_UI_PATH` toma el codigo del enlace o de entrada manual, llama a `/api/auth/password-actions/complete` y, si tiene exito, dirige al login. No usa el codigo como callback OAuth ni recibe tokens.
 
 ## Access token
 
@@ -243,7 +255,7 @@ La llave privada no debe estar en el repositorio. Para rotacion futura se recomi
 
 ## Logout
 
-`POST /auth/logout` elimina la sesion global y revoca todos los refresh tokens indexados para el usuario. Es un logout global del Identity Hub, no un logout federado en cada cliente.
+`POST /api/auth/logout` elimina la sesion global y revoca todos los refresh tokens indexados para el usuario. Es un logout global del Identity Hub, no un logout federado en cada cliente.
 
 Despues del logout, un nuevo `/oauth/authorize` debe requerir login nuevamente.
 

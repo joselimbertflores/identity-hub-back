@@ -34,14 +34,17 @@ export class User {
   @Column({ nullable: true })
   relationKey: string;
 
-  @Column({ unique: true, nullable: true })
-  email: string;
+  @Column({ type: 'varchar', unique: true, nullable: true })
+  email: string | null;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
   @Column({ type: 'boolean', default: true })
   mustChangePassword: boolean;
+
+  @Column({ type: 'integer', default: 0, select: false })
+  credentialVersion: number;
 
   @Column({
     type: 'enum',

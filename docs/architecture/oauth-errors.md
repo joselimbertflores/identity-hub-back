@@ -4,20 +4,20 @@ La regla principal es no redirigir nunca a una `redirect_uri` que no haya sido v
 
 ## Matriz
 
-| Escenario                      | Endpoint               | Salida                                                           |
-| ------------------------------ | ---------------------- | ---------------------------------------------------------------- |
-| `client_id` invalido           | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
-| Aplicacion inactiva            | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
-| `redirect_uri` no registrada   | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
-| Request malformado             | `GET /oauth/authorize` | Error HTTP por validation pipe o error UI segun etapa            |
-| Usuario sin acceso             | `GET /oauth/authorize` | Redirect a callback validado con `error=access_denied` y `state` |
-| Login invalido                 | `POST /oauth/login`    | Redirect a `/login?error=...`                                    |
-| Password temporal en authorize | `GET /oauth/authorize` | Redirect a ruta interna de cambio; no devuelve error al cliente  |
-| Request de token invalido      | `POST /oauth/token`    | JSON 400 `invalid_request`                                       |
-| Grant no soportado             | `POST /oauth/token`    | JSON 400 `unsupported_grant_type`                                |
-| Cliente de token invalido      | `POST /oauth/token`    | JSON 401 `invalid_client` y `WWW-Authenticate: Basic`            |
-| Code, PKCE o refresh invalido  | `POST /oauth/token`    | JSON 400 `invalid_grant`                                         |
-| Basic Auth interno invalido    | `/internal/*`          | JSON 401                                                         |
+| Escenario                     | Endpoint               | Salida                                                           |
+| ----------------------------- | ---------------------- | ---------------------------------------------------------------- |
+| `client_id` invalido          | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
+| Aplicacion inactiva           | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
+| `redirect_uri` no registrada  | `GET /oauth/authorize` | Redirect a error UI del Hub                                      |
+| Request malformado            | `GET /oauth/authorize` | Error HTTP por validation pipe o error UI segun etapa            |
+| Usuario sin acceso            | `GET /oauth/authorize` | Redirect a callback validado con `error=access_denied` y `state` |
+| Login invalido                | `POST /oauth/login`    | Redirect a `/login?error=...`                                    |
+| `mustChangePassword=true`     | `GET /oauth/authorize` | Redirect a ruta interna de cambio; no devuelve error al cliente  |
+| Request de token invalido     | `POST /oauth/token`    | JSON 400 `invalid_request`                                       |
+| Grant no soportado            | `POST /oauth/token`    | JSON 400 `unsupported_grant_type`                                |
+| Cliente de token invalido     | `POST /oauth/token`    | JSON 401 `invalid_client` y `WWW-Authenticate: Basic`            |
+| Code, PKCE o refresh invalido | `POST /oauth/token`    | JSON 400 `invalid_grant`                                         |
+| Basic Auth interno invalido   | `/internal/*`          | JSON 401                                                         |
 
 ## Authorize
 

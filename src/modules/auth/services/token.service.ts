@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { JwtService } from '@nestjs/jwt';
 
@@ -42,12 +42,14 @@ return 1
 
 @Injectable()
 export class TokenService {
+  private readonly logger = new Logger(TokenService.name);
+
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private jwtService: JwtService,
   ) {}
 
-  async prepareTokenPair(payload: AccessTokenPayload): Promise<PreparedTokenPair> {
+  async prepareTokenPair(payload: AccessTokenPayload, credentialVersion: number): Promise<PreparedTokenPair> {
     const accessToken = await this.jwtService.signAsync(payload, {
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
       audience: payload.clientId,
@@ -66,6 +68,7 @@ export class TokenService {
       refreshTokenPayload: {
         userId: payload.sub,
         clientId: payload.clientId,
+        credentialVersion,
         scope: payload.scope,
       },
     };
@@ -135,7 +138,18 @@ export class TokenService {
     }
 
     pipeline.del(setKey);
-    await pipeline.exec();
+    const results = await pipeline.exec();
+    if (!results || results.some(([error]) => error !== null)) {
+      throw new Error('Refresh token revocation failed');
+    }
+  }
+
+  async revokeAllForUserBestEffort(userId: string): Promise<void> {
+    try {
+      await this.revokeAllForUser(userId);
+    } catch {
+      this.logger.warn('Refresh token cleanup failed after credential change');
+    }
   }
 
   private buildRefreshTokenKey(refreshToken: string): string {

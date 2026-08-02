@@ -119,6 +119,7 @@ export class AuthService {
   async findUserEligibleForOAuthCredentials(userId: string, applicationId: number): Promise<User | null> {
     return this.userRepository
       .createQueryBuilder('user')
+      .addSelect('user.credentialVersion')
       .innerJoin('user.applications', 'application')
       .where('user.id = :userId', { userId })
       .andWhere('user.isActive = true')

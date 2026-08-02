@@ -11,6 +11,7 @@ Su responsabilidad es centralizar:
 - flujo OAuth Authorization Code con PKCE S256 obligatorio;
 - emision de JWT RS256 y publicacion de JWKS;
 - refresh tokens rotativos;
+- configuracion inicial y recuperacion de password mediante acciones de un solo uso;
 - endpoints internos para sincronizar usuarios asignados.
 
 Identity Hub no administra roles internos de las aplicaciones cliente. Cada cliente mantiene sus usuarios shadow, permisos y reglas locales.
@@ -24,7 +25,7 @@ Identity Hub no administra roles internos de las aplicaciones cliente. Cada clie
 | [client-integration.md](./client-integration.md) | Guia practica para integrar clientes OAuth confidenciales                     |
 | [oauth-errors.md](./oauth-errors.md)             | Donde se devuelven errores y por que no se redirige a callbacks no confiables |
 | [client-user-import.md](./client-user-import.md) | Endpoints internos `/internal/*` para clientes                                |
-| [provisioning-flow.md](./provisioning-flow.md)   | Alta administrativa de usuarios, aplicaciones y credenciales temporales       |
+| [provisioning-flow.md](./provisioning-flow.md)   | Alta, reset, recuperacion y acciones de password de un solo uso               |
 | [environment.md](./environment.md)               | Variables de entorno, Docker, migraciones, bootstrap y operacion              |
 | [testing.md](./testing.md)                       | Cobertura de pruebas y validaciones manuales pendientes                       |
 
@@ -48,3 +49,4 @@ El backend esta preparado para integracion controlada con clientes si se cumplen
 - Cada aplicacion tiene `clientId`, secreto si es confidencial y `redirectUris` exactas.
 - Los usuarios estan asignados a las aplicaciones que pueden usar.
 - Las llaves RSA existen fuera del repositorio y el `JWT_ISSUER` es estable.
+- El transporte SMTP y las rutas publicas de configuracion de password estan configurados.

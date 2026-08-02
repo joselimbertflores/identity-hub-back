@@ -19,14 +19,28 @@ Este documento describe como configurar Identity Hub en desarrollo, staging y pr
 | `JWT_ISSUER`                           | Claim `iss`                    | `identity-hub`                                | valor estable                     |
 | `IDENTITY_HUB_UI_BASE_URL`             | Origen publico de la UI        | `http://localhost:4200`                       | origen HTTPS del Hub              |
 | `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` | Ruta UI interna de cambio      | `/change-password`                            | ruta Angular desplegada           |
+| `PASSWORD_ACTION_UI_PATH`              | Ruta UI para establecer clave  | `/set-password`                               | ruta UI desplegada                |
+| `PASSWORD_INITIAL_SETUP_TTL_SECONDS`   | Vigencia de configuracion      | `86400` (24 horas)                            | segun politica institucional      |
+| `PASSWORD_RESET_TTL_SECONDS`           | Vigencia de reset/recuperacion | `3600` (60 minutos)                           | segun politica institucional      |
+| `SMTP_HOST`                            | Host SMTP                      | relay o servidor local                        | relay institucional               |
+| `SMTP_PORT`                            | Puerto SMTP                    | `25`, `465` o `587` segun servidor            | segun proveedor                   |
+| `SMTP_SECURE`                          | TLS directo de Nodemailer      | `false` salvo puerto seguro directo           | segun proveedor                   |
+| `SMTP_USERNAME`                        | Usuario SMTP opcional          | omitir para relay                             | secreto, si aplica                |
+| `SMTP_PASSWORD`                        | Password SMTP opcional         | omitir para relay                             | secreto, si aplica                |
+| `SMTP_FROM_ADDRESS`                    | Remitente                      | direccion de desarrollo                       | direccion institucional           |
+| `SMTP_FROM_NAME`                       | Nombre visible del remitente   | `Identity Hub`                                | nombre institucional              |
 | `IDENTITY_COOKIE_SECURE`               | Cookie `secure`                | `false`                                       | `true`                            |
 | `CORS_ORIGIN`                          | Habilita CORS solo si existe   | `http://localhost:4200` si UI usa otro origen | definir solo si aplica            |
 
 La sincronizacion del esquema se controla solo con `DB_SYNCHRONIZE`.
 
-`IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` debe comenzar con `/` y no puede contener host, query ni fragmento. El backend la resuelve siempre contra `IDENTITY_HUB_UI_BASE_URL`; no acepta un destino equivalente desde el navegador.
+`IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` y `PASSWORD_ACTION_UI_PATH` deben comenzar con `/` y no pueden contener host, query ni fragmento. El backend las resuelve siempre contra `IDENTITY_HUB_UI_BASE_URL`; no acepta un destino equivalente desde el navegador ni usa el header `Host` para construir enlaces.
 
 Si Angular corre separado en desarrollo, `IDENTITY_HUB_UI_BASE_URL` apunta a su origen y `CORS_ORIGIN` permite ese origen con cookies. Si Nest sirve `public/browser` en produccion, la base debe ser el origen publico del mismo backend. En ambos casos las rutas de login, cambio de password, home y error son internas del Hub; no deben confundirse con callbacks OAuth almacenados en `Application.redirectUris`.
+
+El esquema HTTP o HTTPS del enlace de configuracion procede exclusivamente de `IDENTITY_HUB_UI_BASE_URL`. Esta fase no impone un esquema nuevo: el entorno debe configurarlo segun su despliegue.
+
+Las credenciales SMTP son opcionales, pero `SMTP_USERNAME` y `SMTP_PASSWORD` deben configurarse juntas. Si ambas se omiten, Nodemailer usa el servidor como relay. `SMTP_SECURE=true` representa TLS desde el inicio de la conexion; no debe confundirse con STARTTLS negociado por el transporte.
 
 ## DB_SYNCHRONIZE vs migraciones
 
@@ -63,6 +77,10 @@ La migracion inicial crea:
 - tabla `user_applications`;
 - indices y constraints de la relacion usuario-aplicacion;
 - tabla `migrations` generada por TypeORM al ejecutar.
+
+`PasswordActionToken` agrega la tabla de estado pendiente `password_action_tokens`. Esta fase no incluye una migracion porque el proyecto sigue en desarrollo y la base puede recrearse con `DB_SYNCHRONIZE=true`. Antes de usar `DB_SYNCHRONIZE=false` en un entorno persistente se debe generar y revisar la migracion correspondiente como una tarea operativa separada.
+
+La entidad `User` incluye tambien `credentialVersion`, un entero interno no nullable con valor inicial `0`. Como no se genera migracion en esta etapa de desarrollo, se debe recrear la base y limpiar Redis al desplegar este cambio. Los refresh tokens emitidos anteriormente no contienen la version y se rechazan; todos los usuarios deben volver a iniciar sesion.
 
 ## Docker local
 
@@ -174,7 +192,11 @@ El rate limiting actual es basico y por IP:
 
 - login;
 - `/oauth/token`;
+- `/api/auth/forgot-password`;
+- `/api/auth/password-actions/complete`;
 - `/internal/*`.
+
+Los dos endpoints publicos de password usan `ThrottlerGuard` real sobre la infraestructura existente: recuperación permite 5 solicitudes por minuto y consumo de acciones 10 por minuto por tracker del throttler. No se implementa un contador local alternativo.
 
 En despliegues con multiples instancias se recomienda usar storage compartido o rate limiting en proxy/WAF.
 
