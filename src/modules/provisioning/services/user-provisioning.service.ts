@@ -43,14 +43,22 @@ export class UserProvisioningService {
 
   async updateUserWithApplications(id: string, dto: UpdateUserWithAccessDto) {
     const { applicationIds, ...userDto } = dto;
-    const user = await this.dataSource.transaction(async (manager) => {
-      const user = await this.usersService.update(id, userDto, manager);
+    const result = await this.dataSource.transaction(async (manager) => {
+      const { user, credentialsInvalidated } = await this.usersService.update(id, userDto, manager);
       if (applicationIds !== undefined) {
         await this.userApplicationsService.syncApplications(user.id, applicationIds, manager);
       }
-      return this.usersService.findOneWithApplications(user.id, manager);
+      return {
+        user: await this.usersService.findOneWithApplications(user.id, manager),
+        credentialsInvalidated,
+      };
     });
-    return { user };
+
+    if (result.credentialsInvalidated) {
+      await this.tokenService.revokeAllForUserBestEffort(result.user.id);
+    }
+
+    return { user: result.user };
   }
 
   async resetPassword(id: string) {

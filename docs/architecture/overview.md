@@ -52,7 +52,7 @@ Las aplicaciones son confidenciales por defecto. Al crear o regenerar una aplica
 
 Los usuarios se crean junto con sus asignaciones. No reciben una contraseña temporal conocida: Identity Hub genera una credencial interna no utilizable y crea una acción de configuración inicial de un solo uso. La acción se envía por correo o se entrega manualmente si no existe correo o falla SMTP. Un administrador puede reenviar una acción pendiente; el nuevo código conserva su propósito y reemplaza al anterior con una nueva expiración.
 
-Un reset administrativo invalida la contraseña, exige establecer una nueva y revoca lógicamente los refresh tokens mediante la versión de credencial. La recuperación pública solo crea una acción para un usuario activo con correo y responde siempre con un mensaje neutro; no invalida la credencial actual hasta que se consume la acción. Completar una acción no inicia una sesión. Establecer una contraseña, mediante enlace o cambio autenticado, elimina cualquier acción pendiente del usuario.
+Desactivar un usuario incrementa la versión de credencial y elimina, como limpieza adicional, sus refresh tokens indexados; reactivarlo no restaura los tokens emitidos antes de la desactivación. Un reset administrativo invalida la contraseña, exige establecer una nueva y revoca lógicamente los refresh tokens mediante la versión de credencial. La recuperación pública solo crea una acción para un usuario activo con correo y responde siempre con un mensaje neutro; no invalida la credencial actual hasta que se consume la acción. Completar una acción no inicia una sesión. Establecer una contraseña, mediante enlace o cambio autenticado, elimina cualquier acción pendiente del usuario.
 
 ## Configuración y seguridad
 

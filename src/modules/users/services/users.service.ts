@@ -95,12 +95,24 @@ export class UsersService {
     }
   }
 
-  async update(id: string, dto: UpdateUserDto, manager?: EntityManager) {
+  async update(
+    id: string,
+    dto: UpdateUserDto,
+    manager?: EntityManager,
+  ): Promise<{ user: User; credentialsInvalidated: boolean }> {
     const repository = manager ? manager.getRepository(User) : this.userRepository;
 
-    const userDB = await repository.findOneBy({ id });
+    const userQuery = repository
+      .createQueryBuilder('user')
+      .addSelect('user.credentialVersion')
+      .where('user.id = :id', { id });
+    if (manager) userQuery.setLock('pessimistic_write');
+
+    const userDB = await userQuery.getOne();
 
     if (!userDB) throw new NotFoundException(`User ${id} not found`);
+
+    const credentialsInvalidated = userDB.isActive && dto.isActive === false;
 
     const email = Object.hasOwn(dto, 'email') ? this.normalizeEmail(dto.email) : undefined;
     if ((dto.login && userDB.login !== dto.login) || (email !== undefined && userDB.email !== email)) {
@@ -120,9 +132,10 @@ export class UsersService {
 
     Object.assign(userDB, dto);
     if (email !== undefined) userDB.email = email;
+    if (credentialsInvalidated) userDB.credentialVersion += 1;
 
     try {
-      return await repository.save(userDB);
+      return { user: await repository.save(userDB), credentialsInvalidated };
     } catch (error: unknown) {
       this.rethrowUniqueConflict(error);
     }

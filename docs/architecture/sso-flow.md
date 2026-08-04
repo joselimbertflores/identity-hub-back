@@ -99,7 +99,7 @@ Para canjear el code se revalidan:
 
 El access token dura 10 minutos. El refresh token dura 10 horas, se guarda en Redis y rota en cada uso. El code y los refresh tokens se consumen de forma atómica; ante dos usos concurrentes solo uno puede tener éxito.
 
-Un cambio o reset de contraseña incrementa la versión interna de la credencial. Los refresh tokens anteriores dejan de ser utilizables aunque falle su eliminación física en Redis. Los access tokens ya emitidos no tienen blacklist y siguen siendo válidos hasta `exp`.
+Un cambio o reset de contraseña, y la transición de usuario activo a inactivo, incrementan la versión interna de la credencial. Los refresh tokens anteriores dejan de ser utilizables aunque falle su eliminación física en Redis y no recuperan validez si el usuario se reactiva. Esta versión se compara únicamente durante el refresh: no forma parte del access token ni de la sesión SSO. Los access tokens ya emitidos no tienen blacklist y siguen siendo válidos hasta `exp`.
 
 ## Tokens e identidad
 
