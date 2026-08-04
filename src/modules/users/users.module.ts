@@ -6,11 +6,12 @@ import { InternalUsersDirectoryController } from './internal-users-directory.con
 import { UsersController } from './users.controller';
 import { UsersDirectoryService, UsersService } from './services';
 import { User } from './entities';
+import { PasswordActionToken } from '../auth/entities';
 
 @Module({
   controllers: [UsersController, InternalUsersDirectoryController],
   providers: [UsersService, UsersDirectoryService],
-  imports: [TypeOrmModule.forFeature([User]), AccessModule],
+  imports: [TypeOrmModule.forFeature([User, PasswordActionToken]), AccessModule],
   exports: [TypeOrmModule, UsersService],
 })
 export class UsersModule {}

@@ -22,9 +22,11 @@ import { UsersService } from 'src/modules/users/services/users.service';
 import { EnvironmentVariables } from 'src/config';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto, CompletePasswordActionDto, ForgotPasswordDto, LoginParamsDto } from '../dtos';
-import { AuthService, MailService, OAuthService, PasswordActionService, TokenService } from '../services';
+import { AuthService, OAuthService, PasswordActionService, TokenService } from '../services';
 import { buildSessionCookieClearOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
+import { buildPasswordChangedEmail } from '../mail/password-email.templates';
+import { MailService } from 'src/modules/mail';
 
 @Controller('auth')
 export class AuthController {
@@ -73,10 +75,13 @@ export class AuthController {
 
     const user = await this.userService.changePassword(userId, body.currentPassword, body.newPassword);
     await this.tokenService.revokeAllForUserBestEffort(userId);
-    try {
-      await this.mailService.sendPasswordChanged(user);
-    } catch {
-      this.logger.warn('Password change notification delivery failed');
+    if (user.email) {
+      try {
+        const email = buildPasswordChangedEmail(user.fullName);
+        await this.mailService.send({ to: user.email, ...email });
+      } catch {
+        this.logger.warn('Password change notification delivery failed');
+      }
     }
 
     const redirectUrl = await this.oauthService.resumeAuthorizeFlow(queryParams, sessionId);

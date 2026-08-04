@@ -3,5 +3,4 @@ export * from './oauth.service';
 export * from './token.service';
 export * from './jwks.service';
 export * from './pkce.service';
-export * from './mail.service';
 export * from './password-action.service';

@@ -7,7 +7,9 @@ import { UserApplicationsService } from '../../access/services';
 import { UsersService } from '../../users/services/users.service';
 import { PasswordActionPurpose } from '../../auth/entities';
 import type { IssuedPasswordAction, PasswordActionDelivery } from '../../auth/interfaces';
-import { MailService, PasswordActionService, TokenService } from '../../auth/services';
+import { PasswordActionService, TokenService } from '../../auth/services';
+import { buildPasswordActionEmail } from '../../auth/mail/password-email.templates';
+import { MailService } from '../../mail';
 import type { User } from '../../users/entities';
 
 @Injectable()
@@ -68,16 +70,16 @@ export class UserProvisioningService {
     };
   }
 
-  async regeneratePasswordAction(id: string) {
+  async resendPasswordAction(id: string) {
     const result = await this.dataSource.transaction(async (manager) => {
       const user = await this.usersService.findOneWithApplications(id, manager);
-      const action = await this.passwordActionService.regenerate(user.id, manager);
+      const action = await this.passwordActionService.resendPasswordAction(user.id, manager);
       return { user, action };
     });
 
     const passwordAction = await this.deliverPasswordAction(result.user, result.action);
     return {
-      message: 'Password action regenerated successfully',
+      message: 'Password action resent successfully',
       passwordAction,
     };
   }
@@ -98,7 +100,8 @@ export class UserProvisioningService {
     }
 
     try {
-      await this.mailService.sendPasswordAction(user, action);
+      const email = buildPasswordActionEmail(user.fullName, action);
+      await this.mailService.send({ to: user.email, ...email });
       return { method: 'EMAIL', status: 'SENT', expiresAt };
     } catch {
       this.logger.warn('Password action email delivery failed; manual fallback returned');

@@ -43,6 +43,7 @@ export class User {
   @Column({ type: 'boolean', default: true })
   mustChangePassword: boolean;
 
+  // Invalidates refresh tokens issued before the latest credential change.
   @Column({ type: 'integer', default: 0, select: false })
   credentialVersion: number;
 

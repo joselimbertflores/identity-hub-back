@@ -11,7 +11,8 @@ import { IDENTITY_HUB_UI_PATHS } from '../constants/oauth.constants';
 import { CompletePasswordActionDto } from '../dtos';
 import { PasswordActionPurpose, PasswordActionToken } from '../entities';
 import type { IssuedPasswordAction } from '../interfaces';
-import { MailService } from './mail.service';
+import { buildPasswordActionEmail, buildPasswordChangedEmail } from '../mail/password-email.templates';
+import { MailService } from 'src/modules/mail';
 import { TokenService } from './token.service';
 
 const PASSWORD_ACTION_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -35,8 +36,12 @@ export class PasswordActionService {
     return this.replaceAction(userId, purpose, manager);
   }
 
-  async regenerate(userId: string, manager: EntityManager): Promise<IssuedPasswordAction> {
-    await this.lockUser(userId, manager);
+  async resendPasswordAction(userId: string, manager: EntityManager): Promise<IssuedPasswordAction> {
+    const user = await this.lockUser(userId, manager);
+    if (!user.isActive) {
+      throw new BadRequestException('Cannot resend a password action for an inactive user');
+    }
+
     const repository = manager.getRepository(PasswordActionToken);
     const current = await repository
       .createQueryBuilder('action')
@@ -71,11 +76,16 @@ export class PasswordActionService {
       return { user, action };
     });
 
-    if (!result) return;
+    if (!result?.user.email) return;
 
-    void this.mailService
-      .sendPasswordAction(result.user, result.action)
-      .catch(() => this.logger.warn('Password recovery email delivery failed'));
+    try {
+      const email = buildPasswordActionEmail(result.user.fullName, result.action);
+      void this.mailService
+        .send({ to: result.user.email, ...email })
+        .catch(() => this.logger.warn('Password recovery email delivery failed'));
+    } catch {
+      this.logger.warn('Password recovery email delivery failed');
+    }
   }
 
   async complete(dto: CompletePasswordActionDto): Promise<{ message: string }> {
@@ -136,7 +146,7 @@ export class PasswordActionService {
       user.mustChangePassword = false;
       user.credentialVersion += 1;
       await manager.getRepository(User).save(user);
-      await actionRepository.remove(action);
+      await actionRepository.delete({ userId: user.id });
 
       return { id: user.id, email: user.email, fullName: user.fullName };
     });
@@ -146,10 +156,13 @@ export class PasswordActionService {
     }
 
     await this.tokenService.revokeAllForUserBestEffort(changedUser.id);
-    try {
-      await this.mailService.sendPasswordChanged(changedUser);
-    } catch {
-      this.logger.warn('Password change notification delivery failed');
+    if (changedUser.email) {
+      try {
+        const email = buildPasswordChangedEmail(changedUser.fullName);
+        await this.mailService.send({ to: changedUser.email, ...email });
+      } catch {
+        this.logger.warn('Password change notification delivery failed');
+      }
     }
 
     return { message: 'Password updated successfully. Sign in with your new password.' };
@@ -183,7 +196,7 @@ export class PasswordActionService {
     };
   }
 
-  private async lockUser(userId: string, manager: EntityManager): Promise<void> {
+  private async lockUser(userId: string, manager: EntityManager): Promise<User> {
     const user = await manager
       .getRepository(User)
       .createQueryBuilder('user')
@@ -194,6 +207,8 @@ export class PasswordActionService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    return user;
   }
 
   private generateCode(): string {

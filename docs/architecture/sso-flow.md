@@ -119,10 +119,11 @@ No contiene roles, correo, `scope`, `mustChangePassword` ni versión de credenci
 
 ## Contraseñas y sesión
 
-- La configuración inicial y los resets administrativos crean acciones de un solo uso en PostgreSQL. Solo se persiste el hash del código.
+- La configuración inicial y los resets administrativos crean acciones con expiración y de un solo uso en PostgreSQL. Solo se persiste el hash del código.
+- Reenviar una acción pendiente conserva su propósito, renueva su expiración e invalida el código anterior.
 - La recuperación pública responde de forma neutra y solo envía correo a usuarios activos con correo registrado.
-- Completar una acción establece la contraseña y revoca refresh tokens, pero no crea sesión ni reanuda OAuth.
-- El cambio autenticado conserva la sesión central y puede reanudar una autorización pendiente.
+- Completar una acción establece la contraseña, elimina acciones pendientes y revoca refresh tokens, pero no crea sesión ni reanuda OAuth.
+- El cambio autenticado elimina acciones pendientes, conserva la sesión central y puede reanudar una autorización pendiente.
 
 ## Logout
 

@@ -1,7 +1,13 @@
-import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
-import { EntityManager, ILike, QueryFailedError, Repository } from 'typeorm';
+import { EntityManager, ILike, In, QueryFailedError, Repository } from 'typeorm';
 import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
@@ -9,10 +15,15 @@ import { ulid } from 'ulid';
 import { CreateUserDto, UpdateUserDto } from '../dtos';
 import { PaginationParamsDto } from '../../common';
 import { User } from '../entities';
+import { PasswordActionToken } from '../../auth/entities';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectRepository(User) private userRepository: Repository<User>) {}
+  constructor(
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @InjectRepository(PasswordActionToken)
+    private readonly passwordActionRepository: Repository<PasswordActionToken>,
+  ) {}
 
   async findAll(paginationDto: PaginationParamsDto) {
     const { limit, offset, term } = paginationDto;
@@ -34,7 +45,24 @@ export class UsersService {
         createdAt: 'DESC',
       },
     });
-    return { users, total };
+
+    const passwordActions = users.length
+      ? await this.passwordActionRepository.find({
+          where: { userId: In(users.map(({ id }) => id)) },
+          select: { userId: true, purpose: true, expiresAt: true },
+        })
+      : [];
+    const passwordActionByUserId = new Map(
+      passwordActions.map(({ userId, purpose, expiresAt }) => [userId, { purpose, expiresAt }]),
+    );
+
+    return {
+      users: users.map((user) => ({
+        ...user,
+        passwordAction: passwordActionByUserId.get(user.id) ?? null,
+      })),
+      total,
+    };
   }
 
   async create(dto: CreateUserDto, passwordHash: string, manager?: EntityManager): Promise<User> {
@@ -122,6 +150,9 @@ export class UsersService {
       .getOne();
 
     if (!user) throw new NotFoundException('User not found');
+    if (!user.isActive) {
+      throw new BadRequestException('Cannot reset the password of an inactive user');
+    }
 
     user.password = passwordHash;
     user.mustChangePassword = true;
@@ -174,6 +205,7 @@ export class UsersService {
       user.mustChangePassword = false;
       user.credentialVersion += 1;
       await repository.save(user);
+      await manager.getRepository(PasswordActionToken).delete({ userId: user.id });
 
       return { id: user.id, email: user.email, fullName: user.fullName };
     });

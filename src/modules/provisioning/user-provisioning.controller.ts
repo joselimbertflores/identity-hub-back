@@ -10,7 +10,7 @@ import { UserProvisioningService } from './services';
 export class UserProvisioningController {
   constructor(private readonly userProvisioningService: UserProvisioningService) {}
 
-  @Post("access")
+  @Post('access')
   create(@Body() body: CreateUserWithAccessDto) {
     return this.userProvisioningService.provisionUserWithApplications(body);
   }
@@ -25,8 +25,8 @@ export class UserProvisioningController {
     return this.userProvisioningService.resetPassword(id);
   }
 
-  @Post(':id/password-action/regenerate')
-  regeneratePasswordAction(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userProvisioningService.regeneratePasswordAction(id);
+  @Post(':id/password-action/resend')
+  resendPasswordAction(@Param('id', ParseUUIDPipe) id: string) {
+    return this.userProvisioningService.resendPasswordAction(id);
   }
 }
