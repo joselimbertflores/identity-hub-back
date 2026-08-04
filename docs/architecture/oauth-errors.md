@@ -51,7 +51,7 @@ Ejemplos:
 
 Si existe `auth_request_id`, se conserva para que la UI no pierda el flujo pendiente.
 
-Con credenciales validas y `mustChangePassword=true`, el login crea la sesion central, conserva el pending sin extender sus cinco minutos de TTL y redirige a la ruta interna configurada. No se usa el callback OAuth como destino de esta navegacion.
+Con credenciales validas y `mustChangePassword=true`, el login crea la sesion central, conserva el pending sin extender sus cinco minutos de TTL y redirige a la ruta interna fija de cambio. No se usa el callback OAuth como destino de esta navegacion.
 
 ## Token
 

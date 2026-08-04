@@ -39,7 +39,7 @@ interface BasicClientCredentials {
 export class OAuthController {
   constructor(
     private readonly oauthService: OAuthService,
-    private readonly configService: ConfigService<EnvironmentVariables>,
+    private readonly configService: ConfigService<EnvironmentVariables, true>,
   ) {}
 
   @Public()
@@ -58,11 +58,12 @@ export class OAuthController {
   @Throttle({ default: { ttl: RATE_LIMIT_TTL_MS, limit: RATE_LIMITS.LOGIN } })
   @Post('login')
   async login(@Body() body: LoginDto, @Query() queryParams: LoginParamsDto, @Res({ passthrough: true }) res: Response) {
-    const secure = this.configService.getOrThrow<string>('IDENTITY_COOKIE_SECURE') === 'true';
+    const secure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
+    const sameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
 
     try {
       const { sessionId, mustChangePassword } = await this.oauthService.authenticateAndCreateSession(body);
-      res.cookie(SESSION_COOKIE_NAME, sessionId, buildSessionCookieOptions(secure));
+      res.cookie(SESSION_COOKIE_NAME, sessionId, buildSessionCookieOptions(secure, sameSite));
 
       const redirectUrl = await this.oauthService.resolvePostLoginRedirect(queryParams, sessionId, mustChangePassword);
       return res.redirect(redirectUrl);

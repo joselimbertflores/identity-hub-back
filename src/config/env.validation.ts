@@ -1,134 +1,80 @@
-import { plainToInstance, Type } from 'class-transformer';
-import {
-  IsEmail,
-  IsIn,
-  IsInt,
-  IsNotEmpty,
-  Max,
-  Min,
-  IsNumber,
-  IsOptional,
-  IsString,
-  IsUrl,
-  Matches,
-  validateSync,
-} from 'class-validator';
+import Joi from 'joi';
 
-export class EnvironmentVariables {
-  @IsNumber()
+export type NodeEnvironment = 'development' | 'test' | 'production';
+export type IdentityCookieSameSite = 'lax' | 'strict' | 'none';
+
+export interface EnvironmentVariables {
+  NODE_ENV: NodeEnvironment;
   PORT: number;
-
-  @IsString()
+  IDENTITY_HUB_PUBLIC_URL: string;
+  IDENTITY_HUB_UI_URL: string;
   DATABASE_HOST: string;
-
-  @IsNumber()
   DATABASE_PORT: number;
-
-  @IsString()
   DATABASE_NAME: string;
-
-  @IsString()
   DATABASE_USER: string;
-
-  @IsString()
   DATABASE_PASSWORD: string;
-
-  @IsIn(['true', 'false'])
-  DB_SYNCHRONIZE: 'true' | 'false';
-
-  @IsString()
-  @IsNotEmpty()
+  DATABASE_SYNCHRONIZE: boolean;
   REDIS_URL: string;
-
-  @IsString()
-  @IsNotEmpty()
-  JWT_PUBLIC_KEY_PATH: string;
-
-  @IsString()
-  @IsNotEmpty()
   JWT_PRIVATE_KEY_PATH: string;
-
-  @IsIn(['true', 'false'])
-  IDENTITY_COOKIE_SECURE: 'true' | 'false';
-
-  @IsOptional()
-  @IsUrl({ require_tld: false })
-  CORS_ORIGIN?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  JWT_ISSUER: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @IsUrl({ require_tld: false })
-  IDENTITY_HUB_UI_BASE_URL: string;
-
-  @IsString()
-  @Matches(/^\/[A-Za-z0-9/_-]*$/, {
-    message: 'IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH must be a relative UI path',
-  })
-  IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH: string;
-
-  @IsString()
-  @Matches(/^\/[A-Za-z0-9/_-]*$/, {
-    message: 'PASSWORD_ACTION_UI_PATH must be a relative UI path',
-  })
-  PASSWORD_ACTION_UI_PATH: string;
-
-  @IsInt()
-  @Min(900)
-  @Max(604800)
-  @Type(() => Number)
-  PASSWORD_INITIAL_SETUP_TTL_SECONDS = 24 * 60 * 60;
-
-  @IsInt()
-  @Min(300)
-  @Max(86400)
-  @Type(() => Number)
-  PASSWORD_RESET_TTL_SECONDS = 60 * 60;
-
-  @IsString()
-  @IsNotEmpty()
+  JWT_PUBLIC_KEY_PATH: string;
+  PASSWORD_INITIAL_SETUP_TTL_SECONDS: number;
+  PASSWORD_RESET_TTL_SECONDS: number;
   SMTP_HOST: string;
-
-  @IsInt()
-  @Min(1)
-  @Max(65535)
   SMTP_PORT: number;
-
-  @IsIn(['true', 'false'])
-  SMTP_SECURE: 'true' | 'false';
-
-  @IsOptional()
-  @IsString()
+  SMTP_SECURE: boolean;
   SMTP_USERNAME?: string;
-
-  @IsOptional()
-  @IsString()
   SMTP_PASSWORD?: string;
-
-  @IsEmail()
   SMTP_FROM_ADDRESS: string;
-
-  @IsString()
-  @IsNotEmpty()
   SMTP_FROM_NAME: string;
+  IDENTITY_COOKIE_SECURE: boolean;
+  IDENTITY_COOKIE_SAME_SITE: IdentityCookieSameSite;
+  BOOTSTRAP_ADMIN_LOGIN?: string;
+  BOOTSTRAP_ADMIN_PASSWORD?: string;
+  BOOTSTRAP_ADMIN_FULL_NAME?: string;
 }
 
-export function validate(config: Record<string, unknown>) {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
-    enableImplicitConversion: true,
-  });
-  const errors = validateSync(validatedConfig, {
-    skipMissingProperties: false,
-  });
+const portSchema = Joi.number().integer().min(1).max(65535);
+const httpUrlSchema = Joi.string().uri({ scheme: ['http', 'https'], allowRelative: false });
 
-  if (errors.length > 0) {
-    throw new Error(errors.toString());
-  }
-  if (Boolean(validatedConfig.SMTP_USERNAME) !== Boolean(validatedConfig.SMTP_PASSWORD)) {
-    throw new Error('SMTP_USERNAME and SMTP_PASSWORD must be configured together');
-  }
-  return validatedConfig;
-}
+export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables> = Joi.object<EnvironmentVariables>({
+  NODE_ENV: Joi.string().valid('development', 'test', 'production').required(),
+  PORT: portSchema.required(),
+  IDENTITY_HUB_PUBLIC_URL: httpUrlSchema.required(),
+  IDENTITY_HUB_UI_URL: httpUrlSchema.required(),
+  DATABASE_HOST: Joi.string().trim().min(1).required(),
+  DATABASE_PORT: portSchema.required(),
+  DATABASE_NAME: Joi.string().trim().min(1).required(),
+  DATABASE_USER: Joi.string().trim().min(1).required(),
+  DATABASE_PASSWORD: Joi.string().min(1).required(),
+  DATABASE_SYNCHRONIZE: Joi.boolean()
+    .when('NODE_ENV', { is: 'production', then: Joi.valid(false) })
+    .required(),
+  REDIS_URL: Joi.string()
+    .uri({ scheme: ['redis', 'rediss'], allowRelative: false })
+    .required(),
+  JWT_PRIVATE_KEY_PATH: Joi.string().min(1).required(),
+  JWT_PUBLIC_KEY_PATH: Joi.string().min(1).required(),
+  PASSWORD_INITIAL_SETUP_TTL_SECONDS: Joi.number()
+    .integer()
+    .positive()
+    .default(24 * 60 * 60),
+  PASSWORD_RESET_TTL_SECONDS: Joi.number()
+    .integer()
+    .positive()
+    .default(60 * 60),
+  SMTP_HOST: Joi.string().trim().min(1).required(),
+  SMTP_PORT: portSchema.required(),
+  SMTP_SECURE: Joi.boolean().required(),
+  SMTP_USERNAME: Joi.string().trim().min(1).optional(),
+  SMTP_PASSWORD: Joi.string().min(1).optional(),
+  SMTP_FROM_ADDRESS: Joi.string().email().required(),
+  SMTP_FROM_NAME: Joi.string().trim().min(1).required(),
+  IDENTITY_COOKIE_SECURE: Joi.boolean().required(),
+  IDENTITY_COOKIE_SAME_SITE: Joi.string()
+    .valid('lax', 'strict', 'none')
+    .when('IDENTITY_COOKIE_SECURE', { is: false, then: Joi.invalid('none') })
+    .required(),
+  BOOTSTRAP_ADMIN_LOGIN: Joi.string().trim().min(1).optional(),
+  BOOTSTRAP_ADMIN_PASSWORD: Joi.string().min(1).optional(),
+  BOOTSTRAP_ADMIN_FULL_NAME: Joi.string().trim().min(1).optional(),
+}).and('SMTP_USERNAME', 'SMTP_PASSWORD');

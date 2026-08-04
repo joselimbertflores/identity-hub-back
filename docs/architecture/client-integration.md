@@ -34,7 +34,7 @@ Cada aplicacion necesita:
 - un `client_id` registrado;
 - un `client_secret` almacenado solo en su backend si es confidencial;
 - una o mas URI de callback registradas exactamente;
-- el valor esperado de `JWT_ISSUER` y acceso al JWKS publico;
+- el valor esperado del issuer derivado de `IDENTITY_HUB_PUBLIC_URL` y acceso al JWKS publico;
 - almacenamiento server-side para `state`, `code_verifier` y tokens.
 
 Identity Hub compara `redirect_uri` por igualdad exacta. No normaliza la URI y no acepta comodines, prefijos ni dominios parciales. HTTP o HTTPS funcionan segun el ambiente, siempre que la URI completa este registrada.
@@ -74,9 +74,9 @@ Una solicitud mal formada o con parametros requeridos ausentes puede terminar co
 
 Si no existe una sesion central, Identity Hub conserva la solicitud authorize validada durante cinco minutos y envia el navegador a su ruta interna de login. Las credenciales correctas crean una cookie central `session_id` HTTP-only con TTL de diez horas.
 
-Si `mustChangePassword=true`, la sesion se conserva pero queda restringida. Identity Hub no emite un authorization code ni devuelve `access_denied`: dirige al usuario a la ruta configurable de cambio de password y mantiene la solicitud pendiente con su TTL original.
+Si `mustChangePassword=true`, la sesion se conserva pero queda restringida. Identity Hub no emite un authorization code ni devuelve `access_denied`: dirige al usuario a la ruta interna de cambio de password y mantiene la solicitud pendiente con su TTL original.
 
-La UI de Identity Hub conserva `auth_request_id` y lo envia al endpoint de cambio autenticado. Al completar el cambio, el backend devuelve un `redirectUrl` que reanuda una sola vez la solicitud pendiente. Si ya vencio, el destino es el home configurado del Hub y la aplicacion cliente debe iniciar una autorizacion nueva cuando el usuario vuelva a ella.
+La UI de Identity Hub conserva `auth_request_id` y lo envia al endpoint de cambio autenticado. Al completar el cambio, el backend devuelve un `redirectUrl` que reanuda una sola vez la solicitud pendiente. Si ya vencio, el destino es el home interno del Hub y la aplicacion cliente debe iniciar una autorizacion nueva cuando el usuario vuelva a ella.
 
 La ruta de cambio de password es una ruta interna del Hub; no es el `redirect_uri` registrado por Intranet o Gaceta y no puede ser sustituida mediante un `returnUrl` del navegador.
 

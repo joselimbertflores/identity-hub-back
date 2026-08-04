@@ -174,7 +174,7 @@ Usuario inexistente produce `404`; login o correo duplicado produce `409`. Todas
 | `PasswordActionService`   | Emitir, reemplazar, consumir y construir URL de acciones          |
 | `MailService`             | Transporte SMTP y plantillas basicas de password                  |
 
-La UI debe mostrar el codigo manual y puede generar un QR usando `actionUrl`; el backend no genera imagenes. La ruta `PASSWORD_ACTION_UI_PATH` es interna del Hub y no es un callback OAuth registrado.
+La UI debe mostrar el codigo manual y puede generar un QR usando `actionUrl`; el backend no genera imagenes. La ruta fija `/set-password` es interna del Hub y no es un callback OAuth registrado.
 
 ## Bootstrap
 

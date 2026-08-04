@@ -12,8 +12,8 @@ import { OAUTH_JWT_KEY_ID } from '../constants/oauth.constants';
 export class JwksService {
   private readonly jwks: { keys: object[] };
 
-  constructor(configService: ConfigService<EnvironmentVariables>) {
-    const publicKeyPem = readJwtKey(configService.getOrThrow('JWT_PUBLIC_KEY_PATH'));
+  constructor(configService: ConfigService<EnvironmentVariables, true>) {
+    const publicKeyPem = readJwtKey(configService.getOrThrow('JWT_PUBLIC_KEY_PATH', { infer: true }));
     const keyObject = createPublicKey(publicKeyPem);
     const jwk = keyObject.export({ format: 'jwk' });
 

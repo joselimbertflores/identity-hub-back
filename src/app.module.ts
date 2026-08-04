@@ -12,27 +12,33 @@ import { ProvisioningModule } from './modules/provisioning/provisioning.module';
 import { AccessModule } from './modules/access/access.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { EnvironmentVariables, validate } from './config';
+import { EnvironmentVariables, environmentValidationSchema } from './config';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from './config/rate-limit.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      validate,
+      validationSchema: environmentValidationSchema,
       isGlobal: true,
+      cache: true,
+      validationOptions: {
+        abortEarly: false,
+        allowUnknown: true,
+        convert: true,
+      },
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService<EnvironmentVariables>) => {
+      useFactory: (configService: ConfigService<EnvironmentVariables, true>) => {
         return {
           type: 'postgres',
-          host: configService.get('DATABASE_HOST'),
-          port: +configService.get('DATABASE_PORT'),
-          database: configService.get('DATABASE_NAME'),
-          username: configService.get('DATABASE_USER'),
-          password: configService.get('DATABASE_PASSWORD'),
+          host: configService.get('DATABASE_HOST', { infer: true }),
+          port: configService.get('DATABASE_PORT', { infer: true }),
+          database: configService.get('DATABASE_NAME', { infer: true }),
+          username: configService.get('DATABASE_USER', { infer: true }),
+          password: configService.get('DATABASE_PASSWORD', { infer: true }),
           autoLoadEntities: true,
-          synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+          synchronize: configService.get('DATABASE_SYNCHRONIZE', { infer: true }),
         };
       },
       inject: [ConfigService],
@@ -46,9 +52,9 @@ import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from './config/rate-limit.config';
     ]),
 
     RedisModule.forRootAsync({
-      useFactory: (configService: ConfigService<EnvironmentVariables>) => ({
+      useFactory: (configService: ConfigService<EnvironmentVariables, true>) => ({
         type: 'single',
-        url: configService.getOrThrow<string>('REDIS_URL'),
+        url: configService.getOrThrow('REDIS_URL', { infer: true }),
       }),
       inject: [ConfigService],
     }),

@@ -13,19 +13,19 @@ export class MailService {
   private readonly transporter: Transporter;
   private readonly from: { address: string; name: string };
 
-  constructor(private readonly configService: ConfigService<EnvironmentVariables>) {
-    const username = this.configService.get<string>('SMTP_USERNAME');
-    const password = this.configService.get<string>('SMTP_PASSWORD');
+  constructor(private readonly configService: ConfigService<EnvironmentVariables, true>) {
+    const username = this.configService.get('SMTP_USERNAME', { infer: true });
+    const password = this.configService.get('SMTP_PASSWORD', { infer: true });
 
     this.transporter = nodemailer.createTransport({
-      host: this.configService.getOrThrow<string>('SMTP_HOST'),
-      port: this.configService.getOrThrow<number>('SMTP_PORT'),
-      secure: this.configService.getOrThrow<string>('SMTP_SECURE') === 'true',
+      host: this.configService.getOrThrow('SMTP_HOST', { infer: true }),
+      port: this.configService.getOrThrow('SMTP_PORT', { infer: true }),
+      secure: this.configService.getOrThrow('SMTP_SECURE', { infer: true }),
       ...(username && password ? { auth: { user: username, pass: password } } : {}),
     });
     this.from = {
-      address: this.configService.getOrThrow<string>('SMTP_FROM_ADDRESS'),
-      name: this.configService.getOrThrow<string>('SMTP_FROM_NAME'),
+      address: this.configService.getOrThrow('SMTP_FROM_ADDRESS', { infer: true }),
+      name: this.configService.getOrThrow('SMTP_FROM_NAME', { infer: true }),
     };
   }
 

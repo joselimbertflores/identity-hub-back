@@ -7,6 +7,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { EnvironmentVariables } from 'src/config';
 import { User } from 'src/modules/users/entities';
+import { IDENTITY_HUB_UI_PATHS } from '../constants/oauth.constants';
 import { CompletePasswordActionDto } from '../dtos';
 import { PasswordActionPurpose, PasswordActionToken } from '../entities';
 import type { IssuedPasswordAction } from '../interfaces';
@@ -24,7 +25,7 @@ export class PasswordActionService {
 
   constructor(
     private readonly dataSource: DataSource,
-    private readonly configService: ConfigService<EnvironmentVariables>,
+    private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly tokenService: TokenService,
     private readonly mailService: MailService,
   ) {}
@@ -220,14 +221,13 @@ export class PasswordActionService {
 
   private getTtlSeconds(purpose: PasswordActionPurpose): number {
     return purpose === PasswordActionPurpose.INITIAL_SETUP
-      ? this.configService.getOrThrow<number>('PASSWORD_INITIAL_SETUP_TTL_SECONDS')
-      : this.configService.getOrThrow<number>('PASSWORD_RESET_TTL_SECONDS');
+      ? this.configService.getOrThrow('PASSWORD_INITIAL_SETUP_TTL_SECONDS', { infer: true })
+      : this.configService.getOrThrow('PASSWORD_RESET_TTL_SECONDS', { infer: true });
   }
 
   private buildActionUrl(code: string): string {
-    const baseUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_UI_BASE_URL');
-    const path = this.configService.getOrThrow<string>('PASSWORD_ACTION_UI_PATH');
-    const url = new URL(path, baseUrl);
+    const baseUrl = this.configService.getOrThrow('IDENTITY_HUB_UI_URL', { infer: true });
+    const url = new URL(IDENTITY_HUB_UI_PATHS.PASSWORD_ACTION, baseUrl);
     url.searchParams.set('code', code);
     return url.toString();
   }

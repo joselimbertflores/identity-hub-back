@@ -19,6 +19,8 @@ El backend autentica usuarios centrales, mantiene una sesion global del navegado
 
 Crear `.env` a partir de `.env.template`.
 
+NestJS valida este archivo al iniciar mediante Joi, convierte numeros y booleanos a sus tipos de runtime y reporta conjuntamente las variables invalidas.
+
 Levantar servicios locales:
 
 ```bash
@@ -28,6 +30,10 @@ docker compose up -d postgres redis
 El compose local expone:
 
 ```env
+NODE_ENV=development
+PORT=8000
+IDENTITY_HUB_PUBLIC_URL=http://localhost:8000
+IDENTITY_HUB_UI_URL=http://localhost:4200
 DATABASE_HOST=localhost
 DATABASE_PORT=5432
 DATABASE_NAME=identity_hub
@@ -39,10 +45,12 @@ REDIS_URL=redis://localhost:6379
 En desarrollo se puede usar:
 
 ```env
-DB_SYNCHRONIZE=true
+DATABASE_SYNCHRONIZE=true
 IDENTITY_COOKIE_SECURE=false
-CORS_ORIGIN=http://localhost:4200
+IDENTITY_COOKIE_SAME_SITE=lax
 ```
+
+HTTP esta permitido en despliegues internos o transitorios. Como Identity Hub gestiona credenciales, sesiones y flujos OAuth, se recomienda firmemente publicar mediante HTTPS y configurar `IDENTITY_COOKIE_SECURE=true`. Con HTTP se usa normalmente `IDENTITY_COOKIE_SECURE=false` y `IDENTITY_COOKIE_SAME_SITE=lax`; `SameSite=none` requiere HTTPS y una cookie segura.
 
 Iniciar el backend:
 
@@ -53,12 +61,12 @@ npm run start:dev
 
 ## Migraciones
 
-`DB_SYNCHRONIZE` controla solo el runtime normal de Nest. El DataSource de TypeORM CLI siempre usa `synchronize: false`.
+`DATABASE_SYNCHRONIZE` controla solo el runtime normal de Nest. El DataSource de TypeORM CLI siempre usa `synchronize: false`.
 
 En produccion:
 
 ```env
-DB_SYNCHRONIZE=false
+DATABASE_SYNCHRONIZE=false
 ```
 
 Comandos:
@@ -79,7 +87,7 @@ Variables:
 
 ```env
 BOOTSTRAP_ADMIN_LOGIN=admin
-BOOTSTRAP_ADMIN_PASSWORD=change-me
+BOOTSTRAP_ADMIN_PASSWORD=
 BOOTSTRAP_ADMIN_FULL_NAME=Identity Hub Admin
 ```
 
@@ -90,6 +98,8 @@ npm run bootstrap:run
 ```
 
 El bootstrap no crea aplicaciones cliente. Gaceta, Intranet y otras aplicaciones se registran desde el panel administrativo del Identity Hub.
+
+Las variables de bootstrap deben existir solo durante este proceso controlado. Retirar la password del entorno cuando termine.
 
 ## Pruebas y build
 

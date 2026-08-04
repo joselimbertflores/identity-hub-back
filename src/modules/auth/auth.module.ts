@@ -44,14 +44,14 @@ import { PasswordActionToken } from './entities';
   ],
   imports: [
     JwtModule.registerAsync({
-      useFactory: (configService: ConfigService<EnvironmentVariables>) => {
+      useFactory: (configService: ConfigService<EnvironmentVariables, true>) => {
         return {
-          privateKey: readJwtKey(configService.getOrThrow('JWT_PRIVATE_KEY_PATH')),
-          publicKey: readJwtKey(configService.getOrThrow('JWT_PUBLIC_KEY_PATH')),
+          privateKey: readJwtKey(configService.getOrThrow('JWT_PRIVATE_KEY_PATH', { infer: true })),
+          publicKey: readJwtKey(configService.getOrThrow('JWT_PUBLIC_KEY_PATH', { infer: true })),
           signOptions: {
             algorithm: 'RS256',
             keyid: OAUTH_JWT_KEY_ID,
-            issuer: configService.getOrThrow<string>('JWT_ISSUER'),
+            issuer: configService.getOrThrow('IDENTITY_HUB_PUBLIC_URL', { infer: true }),
           },
         };
       },

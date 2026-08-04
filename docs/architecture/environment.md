@@ -4,49 +4,52 @@ Este documento describe como configurar Identity Hub en desarrollo, staging y pr
 
 ## Variables
 
-| Variable                               | Uso                            | Desarrollo                                    | Produccion                        |
-| -------------------------------------- | ------------------------------ | --------------------------------------------- | --------------------------------- |
-| `PORT`                                 | Puerto HTTP del backend        | `8000`                                        | segun despliegue                  |
-| `DATABASE_HOST`                        | Host PostgreSQL                | `localhost`                                   | host privado                      |
-| `DATABASE_PORT`                        | Puerto PostgreSQL              | `5432`                                        | `5432`                            |
-| `DATABASE_NAME`                        | Nombre de base                 | `identity_hub`                                | `identity_hub`                    |
-| `DATABASE_USER`                        | Usuario DB                     | `postgres`                                    | usuario dedicado                  |
-| `DATABASE_PASSWORD`                    | Password DB                    | `postgres`                                    | secreto seguro                    |
-| `DB_SYNCHRONIZE`                       | Sincronizacion TypeORM runtime | `true` solo local                             | `false`                           |
-| `REDIS_URL`                            | Conexion Redis                 | `redis://localhost:6379`                      | Redis privado, auth/TLS si aplica |
-| `JWT_PRIVATE_KEY_PATH`                 | Llave privada RSA              | `keys/private.pem`                            | secreto fuera del repo            |
-| `JWT_PUBLIC_KEY_PATH`                  | Llave publica RSA              | `keys/public.pem`                             | ruta publica/segura               |
-| `JWT_ISSUER`                           | Claim `iss`                    | `identity-hub`                                | valor estable                     |
-| `IDENTITY_HUB_UI_BASE_URL`             | Origen publico de la UI        | `http://localhost:4200`                       | origen HTTPS del Hub              |
-| `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` | Ruta UI interna de cambio      | `/change-password`                            | ruta Angular desplegada           |
-| `PASSWORD_ACTION_UI_PATH`              | Ruta UI para establecer clave  | `/set-password`                               | ruta UI desplegada                |
-| `PASSWORD_INITIAL_SETUP_TTL_SECONDS`   | Vigencia de configuracion      | `86400` (24 horas)                            | segun politica institucional      |
-| `PASSWORD_RESET_TTL_SECONDS`           | Vigencia de reset/recuperacion | `3600` (60 minutos)                           | segun politica institucional      |
-| `SMTP_HOST`                            | Host SMTP                      | relay o servidor local                        | relay institucional               |
-| `SMTP_PORT`                            | Puerto SMTP                    | `25`, `465` o `587` segun servidor            | segun proveedor                   |
-| `SMTP_SECURE`                          | TLS directo de Nodemailer      | `false` salvo puerto seguro directo           | segun proveedor                   |
-| `SMTP_USERNAME`                        | Usuario SMTP opcional          | omitir para relay                             | secreto, si aplica                |
-| `SMTP_PASSWORD`                        | Password SMTP opcional         | omitir para relay                             | secreto, si aplica                |
-| `SMTP_FROM_ADDRESS`                    | Remitente                      | direccion de desarrollo                       | direccion institucional           |
-| `SMTP_FROM_NAME`                       | Nombre visible del remitente   | `Identity Hub`                                | nombre institucional              |
-| `IDENTITY_COOKIE_SECURE`               | Cookie `secure`                | `false`                                       | `true`                            |
-| `CORS_ORIGIN`                          | Habilita CORS solo si existe   | `http://localhost:4200` si UI usa otro origen | definir solo si aplica            |
+| Variable                             | Uso                                      | Desarrollo                     | Produccion                        |
+| ------------------------------------ | ---------------------------------------- | ------------------------------ | --------------------------------- |
+| `NODE_ENV`                           | Entorno de ejecucion y validaciones      | `development`                  | `production`                      |
+| `PORT`                               | Puerto interno donde escucha NestJS      | `8000`                         | segun despliegue                  |
+| `IDENTITY_HUB_PUBLIC_URL`            | URL publica del backend e issuer JWT     | `http://localhost:8000`        | URL HTTP o HTTPS publica          |
+| `IDENTITY_HUB_UI_URL`                | URL publica de Angular                   | `http://localhost:4200`        | origen HTTP o HTTPS del Hub       |
+| `DATABASE_HOST`                      | Host PostgreSQL                          | `localhost`                    | host privado                      |
+| `DATABASE_PORT`                      | Puerto PostgreSQL                        | `5432`                         | `5432`                            |
+| `DATABASE_NAME`                      | Nombre de base                           | `identity_hub`                 | `identity_hub`                    |
+| `DATABASE_USER`                      | Usuario DB                               | `postgres`                     | usuario dedicado                  |
+| `DATABASE_PASSWORD`                  | Password DB                              | `postgres`                     | secreto seguro                    |
+| `DATABASE_SYNCHRONIZE`               | Sincronizacion TypeORM runtime           | `false` o `true` solo local    | `false`                           |
+| `REDIS_URL`                          | Conexion Redis                           | `redis://localhost:6379`       | Redis privado, auth/TLS si aplica |
+| `JWT_PRIVATE_KEY_PATH`               | Llave privada RSA                        | `keys/private.pem`             | ruta absoluta fuera del repo      |
+| `JWT_PUBLIC_KEY_PATH`                | Llave publica RSA                        | `keys/public.pem`              | ruta absoluta fuera del repo      |
+| `PASSWORD_INITIAL_SETUP_TTL_SECONDS` | Vigencia de configuracion inicial        | `86400` (24 horas)             | segun politica institucional      |
+| `PASSWORD_RESET_TTL_SECONDS`         | Vigencia de reset/recuperacion           | `3600` (60 minutos)            | segun politica institucional      |
+| `SMTP_HOST`                          | Host SMTP                                | relay o servidor local         | relay institucional               |
+| `SMTP_PORT`                          | Puerto SMTP                              | `25`, `465` o `587`            | segun proveedor                   |
+| `SMTP_SECURE`                        | TLS directo de Nodemailer                | `false` salvo TLS directo      | segun proveedor                   |
+| `SMTP_USERNAME`                      | Usuario SMTP opcional                    | omitir para relay              | secreto, si aplica                |
+| `SMTP_PASSWORD`                      | Password SMTP opcional                   | omitir para relay              | secreto, si aplica                |
+| `SMTP_FROM_ADDRESS`                  | Remitente                                | direccion de desarrollo        | direccion institucional           |
+| `SMTP_FROM_NAME`                     | Nombre visible del remitente             | `Identity Hub`                 | nombre institucional              |
+| `IDENTITY_COOKIE_SECURE`             | Atributo `secure` de la cookie           | `false`                        | `true` con HTTPS                  |
+| `IDENTITY_COOKIE_SAME_SITE`          | Atributo `sameSite` de la cookie         | `lax`                          | `lax`, `strict` o `none`          |
 
-La sincronizacion del esquema se controla solo con `DB_SYNCHRONIZE`.
+`PORT` es el puerto interno donde escucha NestJS; puede ser distinto de la URL publica expuesta por Nginx. El claim JWT `iss` se deriva de `IDENTITY_HUB_PUBLIC_URL` y no tiene una variable independiente.
 
-`IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` y `PASSWORD_ACTION_UI_PATH` deben comenzar con `/` y no pueden contener host, query ni fragmento. El backend las resuelve siempre contra `IDENTITY_HUB_UI_BASE_URL`; no acepta un destino equivalente desde el navegador ni usa el header `Host` para construir enlaces.
+Durante desarrollo, backend y Angular normalmente usan puertos distintos. El backend habilita CORS con credenciales para el origen derivado de `IDENTITY_HUB_UI_URL` cuando difiere de `IDENTITY_HUB_PUBLIC_URL`. En produccion ambas URL pueden compartir el mismo origen publico mediante Nginx, en cuyo caso no se habilita CORS.
 
-Si Angular corre separado en desarrollo, `IDENTITY_HUB_UI_BASE_URL` apunta a su origen y `CORS_ORIGIN` permite ese origen con cookies. Si Nest sirve `public/browser` en produccion, la base debe ser el origen publico del mismo backend. En ambos casos las rutas de login, cambio de password, home y error son internas del Hub; no deben confundirse con callbacks OAuth almacenados en `Application.redirectUris`.
+Las rutas `/login`, `/home/welcome`, `/auth/error`, `/change-password` y `/set-password` son internas y fijas. Se resuelven contra `IDENTITY_HUB_UI_URL`; no se configuran mediante variables ni se confunden con callbacks OAuth almacenados en `Application.redirectUris`.
 
-El esquema HTTP o HTTPS del enlace de configuracion procede exclusivamente de `IDENTITY_HUB_UI_BASE_URL`. Esta fase no impone un esquema nuevo: el entorno debe configurarlo segun su despliegue.
+El esquema HTTP o HTTPS de los enlaces de configuracion procede exclusivamente de `IDENTITY_HUB_UI_URL`. HTTP esta permitido para despliegues internos o transitorios, pero HTTPS se recomienda firmemente porque Identity Hub gestiona credenciales, sesiones y flujos OAuth.
+
+`ConfigModule` valida el entorno al iniciar mediante el esquema Joi central de `src/config/env.validation.ts`. La validacion convierte puertos y TTL a numeros, y las opciones `true`/`false` a booleanos. Ambas URL aceptan HTTP o HTTPS; en produccion se mantiene `DATABASE_SYNCHRONIZE=false` y todos los errores se informan juntos.
 
 Las credenciales SMTP son opcionales, pero `SMTP_USERNAME` y `SMTP_PASSWORD` deben configurarse juntas. Si ambas se omiten, Nodemailer usa el servidor como relay. `SMTP_SECURE=true` representa TLS desde el inicio de la conexion; no debe confundirse con STARTTLS negociado por el transporte.
 
-## DB_SYNCHRONIZE vs migraciones
+Las rutas JWT relativas se resuelven desde el directorio de trabajo del proceso. Tambien se admiten rutas absolutas; en produccion se recomiendan ubicaciones externas al proyecto desplegado.
 
-`DB_SYNCHRONIZE=true` permite que TypeORM sincronice entidades en runtime. Usarlo solo para desarrollo local.
+## DATABASE_SYNCHRONIZE vs migraciones
 
-`DB_SYNCHRONIZE=false` evita cambios automaticos de esquema. Usarlo en staging y produccion.
+`DATABASE_SYNCHRONIZE=true` permite que TypeORM sincronice entidades en runtime. Usarlo solo para desarrollo local.
+
+`DATABASE_SYNCHRONIZE=false` evita cambios automaticos de esquema. Es obligatorio en staging y produccion, donde deben ejecutarse migraciones.
 
 El DataSource de TypeORM CLI vive en:
 
@@ -78,7 +81,7 @@ La migracion inicial crea:
 - indices y constraints de la relacion usuario-aplicacion;
 - tabla `migrations` generada por TypeORM al ejecutar.
 
-`PasswordActionToken` agrega la tabla de estado pendiente `password_action_tokens`. Esta fase no incluye una migracion porque el proyecto sigue en desarrollo y la base puede recrearse con `DB_SYNCHRONIZE=true`. Antes de usar `DB_SYNCHRONIZE=false` en un entorno persistente se debe generar y revisar la migracion correspondiente como una tarea operativa separada.
+`PasswordActionToken` agrega la tabla de estado pendiente `password_action_tokens`. Esta fase no incluye una migracion porque el proyecto sigue en desarrollo y la base puede recrearse con `DATABASE_SYNCHRONIZE=true`. Antes de usar `DATABASE_SYNCHRONIZE=false` en un entorno persistente se debe generar y revisar la migracion correspondiente como una tarea operativa separada.
 
 La entidad `User` incluye tambien `credentialVersion`, un entero interno no nullable con valor inicial `0`. Como no se genera migracion en esta etapa de desarrollo, se debe recrear la base y limpiar Redis al desplegar este cambio. Los refresh tokens emitidos anteriormente no contienen la version y se rechazan; todos los usuarios deben volver a iniciar sesion.
 
@@ -117,7 +120,7 @@ Variables:
 
 ```env
 BOOTSTRAP_ADMIN_LOGIN=admin
-BOOTSTRAP_ADMIN_PASSWORD=change-me
+BOOTSTRAP_ADMIN_PASSWORD=
 BOOTSTRAP_ADMIN_FULL_NAME=Identity Hub Admin
 ```
 
@@ -129,6 +132,7 @@ Reglas:
 - no promueve usuarios existentes automaticamente;
 - no crea aplicaciones cliente;
 - no imprime password ni secretos.
+- las variables se retiran del entorno cuando el proceso controlado termina, especialmente la password.
 
 ## Aplicaciones cliente
 
@@ -154,18 +158,17 @@ Recomendado:
 - guardar la llave privada fuera del repo;
 - usar secretos del entorno/plataforma;
 - respaldar la llave privada de forma segura;
-- mantener `JWT_ISSUER` estable;
+- mantener estable `IDENTITY_HUB_PUBLIC_URL`, del que se deriva el issuer;
 - planificar rotacion futura con multiples `kid` publicados durante una ventana de transicion.
 
 El `kid` actual es `main-key`.
 
 ### Cookies
 
-En produccion:
-
-- `IDENTITY_COOKIE_SECURE=true`;
-- servir por HTTPS;
-- mantener `sameSite=lax` salvo que el despliegue requiera otro comportamiento;
+- configurar `IDENTITY_COOKIE_SECURE=true` cuando el servicio se publique mediante HTTPS;
+- con HTTP, usar normalmente `IDENTITY_COOKIE_SECURE=false` y `IDENTITY_COOKIE_SAME_SITE=lax`;
+- configurar `IDENTITY_COOKIE_SAME_SITE` como `lax`, `strict` o `none`;
+- `IDENTITY_COOKIE_SAME_SITE=none` requiere HTTPS e `IDENTITY_COOKIE_SECURE=true`;
 - configurar `trust proxy` si el backend corre detras de proxy TLS y Nest/Express debe confiar en headers del proxy.
 
 ### Redis
@@ -204,7 +207,7 @@ En despliegues con multiples instancias se recomienda usar storage compartido o 
 
 1. Copiar `.env.template` a `.env`.
 2. Levantar `docker compose up -d postgres redis`.
-3. Usar `DB_SYNCHRONIZE=true` o ejecutar migraciones.
+3. Usar `DATABASE_SYNCHRONIZE=true` solo localmente o ejecutar migraciones.
 4. Crear llaves RSA locales.
 5. Ejecutar `npm run start:dev`.
 6. Ejecutar `npm run test`.
@@ -212,7 +215,7 @@ En despliegues con multiples instancias se recomienda usar storage compartido o 
 ## Checklist de staging
 
 1. Usar base limpia dedicada.
-2. Configurar `DB_SYNCHRONIZE=false`.
+2. Configurar `DATABASE_SYNCHRONIZE=false`.
 3. Ejecutar `npm run migration:run`.
 4. Ejecutar bootstrap manual si no existe admin.
 5. Registrar las aplicaciones cliente desde el panel.
@@ -222,13 +225,13 @@ En despliegues con multiples instancias se recomienda usar storage compartido o 
 
 ## Checklist de produccion
 
-1. `DB_SYNCHRONIZE=false`.
+1. `DATABASE_SYNCHRONIZE=false`.
 2. Migraciones revisadas y ejecutadas en ventana controlada.
 3. Llaves RSA fuera del repo y respaldadas.
 4. Redis privado y protegido.
-5. `IDENTITY_COOKIE_SECURE=true`.
-6. HTTPS y proxy configurado.
-7. CORS definido solo si la UI corre en otro origen.
+5. Configurar `IDENTITY_COOKIE_SECURE` segun el esquema publico; usar `true` con HTTPS.
+6. Preferir HTTPS; documentar y restringir cualquier despliegue HTTP interno o transitorio.
+7. Verificar que las URL publicas produzcan el origen CORS esperado si la UI corre separada.
 8. Rate limiting compartido o en proxy si hay multiples instancias.
 9. Logs sin secretos.
 10. Aplicaciones cliente y asignaciones creadas desde el panel administrativo.

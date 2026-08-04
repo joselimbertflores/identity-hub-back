@@ -76,14 +76,14 @@ En intranet se recomienda HTTPS siempre que sea posible. HTTP o IP privada puede
 
 Cookie:
 
-| Propiedad  | Valor                    |
-| ---------- | ------------------------ |
-| Nombre     | `session_id`             |
-| `httpOnly` | `true`                   |
-| `sameSite` | `lax`                    |
-| `secure`   | `IDENTITY_COOKIE_SECURE` |
-| `path`     | `/`                      |
-| TTL        | 10 horas                 |
+| Propiedad  | Valor                       |
+| ---------- | --------------------------- |
+| Nombre     | `session_id`                |
+| `httpOnly` | `true`                      |
+| `sameSite` | `IDENTITY_COOKIE_SAME_SITE` |
+| `secure`   | `IDENTITY_COOKIE_SECURE`    |
+| `path`     | `/`                         |
+| TTL        | 10 horas                    |
 
 Si no hay sesion, el Hub crea un request pendiente en Redis y redirige a la UI de login.
 
@@ -91,7 +91,7 @@ Las credenciales validas siempre pueden crear una sesion central. Si `mustChange
 
 Las altas y resets administrativos ya no entregan una password temporal conocida. Esos usuarios establecen su password mediante una accion publica de un solo uso y luego entran por el login normal. El flujo de sesion restringida se conserva para cualquier usuario que tenga credenciales validas mientras `mustChangePassword=true`, incluido el bootstrap controlado.
 
-La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` y se resuelve contra `IDENTITY_HUB_UI_BASE_URL`. No es un callback OAuth y el navegador no puede sustituirla mediante `returnUrl` o `redirect_uri`.
+La ruta interna de cambio es `/change-password` y se resuelve contra `IDENTITY_HUB_UI_URL`. No es un callback OAuth y el navegador no puede sustituirla mediante `returnUrl` o `redirect_uri`.
 
 ## Estado en Redis
 
@@ -103,7 +103,7 @@ La ruta interna de cambio se configura con `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH
 | `refresh:{refreshToken}`        | `userId`, `clientId` y `credentialVersion`              | 10h   | Lectura inicial y rotacion atomica al completar       |
 | `user_refresh_tokens:{userId}`  | Indice para revocacion global                           | 10h   | Actualizacion atomica al emitir o rotar; `DEL` logout |
 
-`GETDEL` evita reuso de requests pendientes. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su home configurado y no reconstruye el request desde parametros del navegador.
+`GETDEL` evita reuso de requests pendientes. Al completar el login, el pending se vincula al `sessionId` sin extender su TTL (`KEEPTTL`). Solo esa sesion puede consumirlo. Si vence, el Hub usa su ruta interna de home y no reconstruye el request desde parametros del navegador.
 
 Los authorization codes y refresh tokens no se eliminan durante su lectura inicial. Despues de validar el grant y preparar los tokens en memoria, un script Lua compara el valor actual con el valor exacto leido. Solo si coincide consume la credencial y persiste el refresh nuevo junto con su indice.
 
@@ -117,7 +117,7 @@ Los authorization codes y refresh tokens no se eliminan durante su lectura inici
 6. Si `mustChangePassword=false`, el Hub consume el pending y reanuda `/oauth/authorize`.
 7. Si `mustChangePassword=true`, conserva y vincula el pending, mantiene la sesion y dirige a la ruta interna de cambio de password.
 8. Un `/oauth/authorize` iniciado con sesion restringida primero valida cliente y callback, guarda el request validado como pending y dirige a la misma ruta interna. No devuelve `access_denied` ni emite code en esta etapa.
-9. `PATCH /api/auth/change-password` actualiza hash, flag y version de credencial en una transaccion corta. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home configurado si no existe o ya vencio.
+9. `PATCH /api/auth/change-password` actualiza hash, flag y version de credencial en una transaccion corta. Devuelve `redirectUrl`: el authorize pendiente consumido una sola vez o el home interno si no existe o ya vencio.
 10. Al reanudar, el Hub valida usuario activo, `mustChangePassword=false`, aplicacion activa y asignacion usuario-aplicacion.
 11. El Hub crea `auth_code:{code}` y redirige a `redirect_uri?code=...&state=...`.
 12. El backend cliente llama `/oauth/token` con formulario URL-encoded. Los clientes confidenciales usan HTTP Basic; los publicos se identifican con `client_id`.
@@ -160,15 +160,13 @@ Despues de confirmar un cambio de credencial, Redis se limpia como best effort. 
 
 ## Contrato de redireccion del Hub
 
-- `IDENTITY_HUB_UI_BASE_URL` identifica el origen publico donde vive la UI del Hub.
-- `IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH` es una ruta relativa configurada, sin host, query ni fragmento.
-- `PASSWORD_ACTION_UI_PATH` es la ruta publica interna que recibe el codigo de configuracion/reset.
-- En desarrollo con UI separada, la base apunta al origen de Angular y se habilita `CORS_ORIGIN` con credenciales.
-- En produccion de mismo origen, la base apunta al origen publico del backend que sirve `public/browser`.
-- `/login`, la ruta de cambio, `/home/welcome` y `/auth/error` son rutas internas del Hub.
+- `IDENTITY_HUB_UI_URL` identifica la URL publica donde vive la UI del Hub.
+- En desarrollo con UI separada, CORS se habilita con credenciales para el origen de `IDENTITY_HUB_UI_URL`.
+- En produccion de mismo origen, `IDENTITY_HUB_PUBLIC_URL` y `IDENTITY_HUB_UI_URL` pueden apuntar al origen HTTP o HTTPS servido por Nginx; HTTPS es la opcion fuertemente recomendada.
+- `/login`, `/change-password`, `/set-password`, `/home/welcome` y `/auth/error` son rutas internas fijas del Hub.
 - `Application.redirectUris` contiene callbacks externos registrados y solo se usa despues de validacion exacta.
 - La UI debe conservar `auth_request_id`, enviarlo como query en `PATCH /api/auth/change-password` y navegar al `redirectUrl` de la respuesta. No debe enviar un `returnUrl`.
-- La UI de `PASSWORD_ACTION_UI_PATH` toma el codigo del enlace o de entrada manual, llama a `/api/auth/password-actions/complete` y, si tiene exito, dirige al login. No usa el codigo como callback OAuth ni recibe tokens.
+- La UI de `/set-password` toma el codigo del enlace o de entrada manual, llama a `/api/auth/password-actions/complete` y, si tiene exito, dirige al login. No usa el codigo como callback OAuth ni recibe tokens.
 
 ## Access token
 
@@ -180,7 +178,7 @@ Claims/headers relevantes:
 | ------------- | -------------------------------------------------------- |
 | `alg`         | `RS256`                                                  |
 | `kid`         | `main-key`                                               |
-| `iss`         | `JWT_ISSUER`                                             |
+| `iss`         | Valor derivado de `IDENTITY_HUB_PUBLIC_URL`              |
 | `aud`         | `clientId` usado como audiencia                          |
 | `sub`         | id interno del usuario en Identity Hub                   |
 | `externalKey` | identificador estable para clientes                      |

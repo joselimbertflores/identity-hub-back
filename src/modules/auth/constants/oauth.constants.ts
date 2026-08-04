@@ -14,4 +14,6 @@ export const IDENTITY_HUB_UI_PATHS = {
   LOGIN: '/login',
   HOME: '/home/welcome',
   ERROR: '/auth/error',
+  CHANGE_PASSWORD: '/change-password',
+  PASSWORD_ACTION: '/set-password',
 } as const;

@@ -43,10 +43,10 @@ Identity Hub no administra roles internos de las aplicaciones cliente. Cada clie
 El backend esta preparado para integracion controlada con clientes si se cumplen estos puntos:
 
 - PostgreSQL y Redis estan disponibles.
-- Existe una migracion inicial ejecutada en la base si `DB_SYNCHRONIZE=false`.
+- Existe una migracion inicial ejecutada en la base si `DATABASE_SYNCHRONIZE=false`.
 - Existe al menos un usuario `ADMIN`, creado por bootstrap manual o por otro proceso controlado.
 - Las aplicaciones cliente se registran desde el panel administrativo del Hub.
 - Cada aplicacion tiene `clientId`, secreto si es confidencial y `redirectUris` exactas.
 - Los usuarios estan asignados a las aplicaciones que pueden usar.
-- Las llaves RSA existen fuera del repositorio y el `JWT_ISSUER` es estable.
+- Las llaves RSA existen fuera del repositorio y `IDENTITY_HUB_PUBLIC_URL`, del que se deriva el issuer, es estable.
 - El transporte SMTP y las rutas publicas de configuracion de password estan configurados.

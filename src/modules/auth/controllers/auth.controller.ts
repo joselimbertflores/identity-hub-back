@@ -33,7 +33,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UsersService,
-    private readonly configService: ConfigService<EnvironmentVariables>,
+    private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly oauthService: OAuthService,
     private readonly passwordActionService: PasswordActionService,
     private readonly tokenService: TokenService,
@@ -52,9 +52,10 @@ export class AuthController {
     @Cookies(SESSION_COOKIE_NAME) sessionId: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const cookieSecure = this.configService.getOrThrow<string>('IDENTITY_COOKIE_SECURE') === 'true';
+    const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
+    const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
     const result = await this.authService.removeAuthSession(sessionId);
-    response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure));
+    response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure, cookieSameSite));
     return result;
   }
 

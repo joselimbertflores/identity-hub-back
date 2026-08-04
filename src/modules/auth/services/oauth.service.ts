@@ -29,7 +29,7 @@ export class OAuthService {
   constructor(
     @InjectRepository(Application) private readonly appRepository: Repository<Application>,
     @InjectRedis() private readonly redis: Redis,
-    private readonly configService: ConfigService<EnvironmentVariables>,
+    private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly tokenService: TokenService,
     private readonly authService: AuthService,
     private readonly pkceService: PkceService,
@@ -321,12 +321,11 @@ export class OAuthService {
   }
 
   private buildPasswordChangeRedirectUrl(authRequestId?: string): string {
-    const path = this.configService.getOrThrow<string>('IDENTITY_HUB_UI_CHANGE_PASSWORD_PATH');
-    return this.buildIdentityHubUiUrl(path, { auth_request_id: authRequestId });
+    return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.CHANGE_PASSWORD, { auth_request_id: authRequestId });
   }
 
   private buildIdentityHubUiUrl(path: string, params?: Record<string, string | undefined>): string {
-    const baseUrl = this.configService.getOrThrow<string>('IDENTITY_HUB_UI_BASE_URL');
+    const baseUrl = this.configService.getOrThrow('IDENTITY_HUB_UI_URL', { infer: true });
     const url = new URL(path, baseUrl);
     for (const [key, value] of Object.entries(params ?? {})) {
       if (value) {
