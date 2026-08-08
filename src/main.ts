@@ -35,6 +35,6 @@ async function bootstrap() {
     app.enableCors({ origin: uiOrigin, credentials: true });
   }
 
-  await app.listen(configService.getOrThrow('PORT', { infer: true }), "192.168.30.34");
+  await app.listen(configService.getOrThrow('PORT', { infer: true }));
 }
 void bootstrap();
