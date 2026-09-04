@@ -26,6 +26,18 @@ export class UserProvisioningService {
   ) {}
 
   async provisionUserWithApplications(dto: CreateUserWithAccessDto) {
+    const result = await this.createProvisionedUser(dto);
+    const passwordAction = await this.deliverPasswordAction(result.user, result.action);
+
+    return { user: result.user, passwordAction };
+  }
+
+  async provisionUserWithApplicationsWithoutNotification(dto: CreateUserWithAccessDto) {
+    const { user } = await this.createProvisionedUser(dto);
+    return { user };
+  }
+
+  private async createProvisionedUser(dto: CreateUserWithAccessDto) {
     const { applicationIds, ...userDto } = dto;
     const passwordHash = await this.usersService.prepareUnknownPasswordHash();
     const result = await this.dataSource.transaction(async (manager) => {
@@ -36,9 +48,7 @@ export class UserProvisioningService {
     });
 
     const user = await this.usersService.findOneWithApplications(result.userId);
-    const passwordAction = await this.deliverPasswordAction(user, result.action);
-
-    return { user, passwordAction };
+    return { user, action: result.action };
   }
 
   async updateUserWithApplications(id: string, dto: UpdateUserWithAccessDto) {
