@@ -1,9 +1,13 @@
 import type { MailContent } from 'src/modules/mail';
+import type { User } from 'src/modules/users/entities';
 
 import { PasswordActionPurpose } from '../entities';
 import type { IssuedPasswordAction } from '../interfaces';
 
-export function buildPasswordActionEmail(fullName: string, action: IssuedPasswordAction): MailContent {
+export function buildPasswordActionEmail(
+  { fullName, login }: Pick<User, 'fullName' | 'login'>,
+  action: IssuedPasswordAction,
+): MailContent {
   const isInitialSetup = action.purpose === PasswordActionPurpose.INITIAL_SETUP;
   const purposeText = isInitialSetup ? 'configurar tu contraseña inicial' : 'restablecer tu contraseña';
   const subject = isInitialSetup
@@ -11,6 +15,7 @@ export function buildPasswordActionEmail(fullName: string, action: IssuedPasswor
     : 'Restablece tu contraseña de Identity Hub';
   const expiresAt = action.expiresAt.toISOString();
   const safeName = escapeHtml(fullName);
+  const safeLogin = escapeHtml(login);
   const safePurposeText = escapeHtml(purposeText);
   const safeActionUrl = escapeHtml(action.actionUrl);
   const safeExpiresAt = escapeHtml(expiresAt);
@@ -20,6 +25,8 @@ export function buildPasswordActionEmail(fullName: string, action: IssuedPasswor
     text: [
       `Hola ${fullName},`,
       '',
+      `Tu usuario de Identity Hub es: ${login}`,
+      '',
       `Usa el siguiente enlace para ${purposeText}:`,
       action.actionUrl,
       '',
@@ -28,6 +35,7 @@ export function buildPasswordActionEmail(fullName: string, action: IssuedPasswor
     ].join('\n'),
     html: [
       `<p>Hola ${safeName},</p>`,
+      `<p>Tu usuario de Identity Hub es: <strong>${safeLogin}</strong></p>`,
       `<p>Usa el siguiente enlace para ${safePurposeText}:</p>`,
       `<p><a href="${safeActionUrl}">${safeActionUrl}</a></p>`,
       `<p>El enlace vence el ${safeExpiresAt}.</p>`,

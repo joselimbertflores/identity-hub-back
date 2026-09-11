@@ -3,17 +3,17 @@ import { ConfigService } from '@nestjs/config';
 
 import { hash } from 'bcrypt';
 import { createHash, randomInt } from 'node:crypto';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, LessThanOrEqual } from 'typeorm';
 
 import { EnvironmentVariables } from 'src/config';
 import { User } from 'src/modules/users/entities';
 import { IDENTITY_HUB_UI_PATHS } from '../constants/oauth.constants';
 import { CompletePasswordActionDto } from '../dtos';
 import { PasswordActionPurpose, PasswordActionToken } from '../entities';
-import type { IssuedPasswordAction } from '../interfaces';
+import type { IssuedPasswordAction, PasswordActionDelivery } from '../interfaces';
 import { buildPasswordActionEmail, buildPasswordChangedEmail } from '../mail/password-email.templates';
 import { MailService } from 'src/modules/mail';
-import { TokenService } from './token.service';
+import { AuthService } from './auth.service';
 
 const PASSWORD_ACTION_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 const PASSWORD_ACTION_CODE_LENGTH = 30;
@@ -27,12 +27,13 @@ export class PasswordActionService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
-    private readonly tokenService: TokenService,
+    private readonly authService: AuthService,
     private readonly mailService: MailService,
   ) {}
 
   async issue(userId: string, purpose: PasswordActionPurpose, manager: EntityManager): Promise<IssuedPasswordAction> {
-    await this.lockUser(userId, manager);
+    const user = await this.lockUser(userId, manager);
+    this.requireEmail(user);
     return this.replaceAction(userId, purpose, manager);
   }
 
@@ -41,6 +42,7 @@ export class PasswordActionService {
     if (!user.isActive) {
       throw new BadRequestException('Cannot resend a password action for an inactive user');
     }
+    this.requireEmail(user);
 
     const repository = manager.getRepository(PasswordActionToken);
     const current = await repository
@@ -49,7 +51,7 @@ export class PasswordActionService {
       .where('action.userId = :userId', { userId })
       .getOne();
 
-    if (!current) {
+    if (!current || current.expiresAt.getTime() <= Date.now()) {
       throw new NotFoundException('No pending password action found');
     }
 
@@ -57,8 +59,9 @@ export class PasswordActionService {
   }
 
   async requestRecovery(identifier: string): Promise<void> {
+    await this.removeExpiredActions();
     const result = await this.dataSource.transaction(async (manager) => {
-      const user = await manager
+      const users = await manager
         .getRepository(User)
         .createQueryBuilder('user')
         .setLock('pessimistic_write')
@@ -68,9 +71,13 @@ export class PasswordActionService {
         })
         .andWhere('user.isActive = true')
         .andWhere('user.email IS NOT NULL')
-        .getOne();
+        .andWhere("TRIM(user.email) <> ''")
+        .getMany();
 
-      if (!user) return null;
+      // Legacy cross-field collisions between one user's login and another user's
+      // email must never select an arbitrary recovery target.
+      if (users.length !== 1) return null;
+      const [user] = users;
 
       const action = await this.issue(user.id, PasswordActionPurpose.PASSWORD_RESET, manager);
       return { user, action };
@@ -78,17 +85,27 @@ export class PasswordActionService {
 
     if (!result?.user.email) return;
 
+    void this.deliver(result.user, result.action).catch(() =>
+      this.logger.warn('Password recovery email delivery failed'),
+    );
+  }
+
+  async deliver(
+    user: Pick<User, 'email' | 'fullName' | 'login'>,
+    action: IssuedPasswordAction,
+  ): Promise<PasswordActionDelivery> {
+    const to = this.requireEmail(user);
+    const expiresAt = action.expiresAt.toISOString();
     try {
-      const email = buildPasswordActionEmail(result.user.fullName, result.action);
-      void this.mailService
-        .send({ to: result.user.email, ...email })
-        .catch(() => this.logger.warn('Password recovery email delivery failed'));
+      await this.mailService.send({ to, ...buildPasswordActionEmail(user, action) });
+      return { method: 'EMAIL', status: 'SENT', expiresAt };
     } catch {
-      this.logger.warn('Password recovery email delivery failed');
+      this.logger.warn('Password action email delivery failed');
+      return { method: 'EMAIL', status: 'FAILED', expiresAt };
     }
   }
 
-  async complete(dto: CompletePasswordActionDto): Promise<{ message: string }> {
+  async completePasswordAction(dto: CompletePasswordActionDto): Promise<{ message: string }> {
     if (dto.newPassword !== dto.passwordConfirmation) {
       throw new BadRequestException('Password confirmation does not match.');
     }
@@ -98,6 +115,7 @@ export class PasswordActionService {
       throw new BadRequestException(INVALID_ACTION_MESSAGE);
     }
     const tokenHash = this.hashCode(normalizedCode);
+    await this.removeExpiredActions();
     const candidate = await this.dataSource.getRepository(PasswordActionToken).findOne({ where: { tokenHash } });
     if (!candidate || candidate.expiresAt.getTime() <= Date.now() || !this.isSupportedPurpose(candidate.purpose)) {
       throw new BadRequestException(INVALID_ACTION_MESSAGE);
@@ -155,7 +173,7 @@ export class PasswordActionService {
       throw new BadRequestException(INVALID_ACTION_MESSAGE);
     }
 
-    await this.tokenService.revokeAllForUserBestEffort(changedUser.id);
+    await this.authService.cleanupInvalidatedAuthStateForUserBestEffort(changedUser.id);
     if (changedUser.email) {
       try {
         const email = buildPasswordChangedEmail(changedUser.fullName);
@@ -209,6 +227,20 @@ export class PasswordActionService {
     }
 
     return user;
+  }
+
+  private requireEmail(user: Pick<User, 'email'>): string {
+    if (!user.email?.trim()) {
+      throw new BadRequestException({
+        code: 'USER_EMAIL_REQUIRED',
+        message: 'Register an email address for the user before sending a password setup or recovery link.',
+      });
+    }
+    return user.email;
+  }
+
+  private async removeExpiredActions(): Promise<void> {
+    await this.dataSource.getRepository(PasswordActionToken).delete({ expiresAt: LessThanOrEqual(new Date()) });
   }
 
   private generateCode(): string {

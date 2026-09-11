@@ -6,11 +6,11 @@ import { Application } from '../entities';
 
 @Injectable()
 export class AccessPortalService {
-  constructor(@InjectRepository(Application) private appResository: Repository<Application>) {}
+  constructor(@InjectRepository(Application) private readonly applicationRepository: Repository<Application>) {}
 
   async getUserApplications(userId: string) {
-    return await this.appResository.find({
-      where: { users: { id: userId } },
+    return this.applicationRepository.find({
+      where: { users: { id: userId }, isActive: true },
       select: ['name', 'description', 'launchUrl', 'color'],
     });
   }

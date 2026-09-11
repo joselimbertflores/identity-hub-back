@@ -31,8 +31,8 @@ export class User {
   @Column({ unique: true })
   externalKey: string;
 
-  @Column({ nullable: true })
-  relationKey: string;
+  @Column('varchar', { nullable: true })
+  relationKey: string | null;
 
   @Column({ type: 'varchar', unique: true, nullable: true })
   email: string | null;
@@ -43,7 +43,7 @@ export class User {
   @Column({ type: 'boolean', default: true })
   mustChangePassword: boolean;
 
-  // Invalidates refresh tokens issued before the latest credential change.
+  // Invalidates refresh tokens and SSO sessions issued before the latest credential change.
   @Column({ type: 'integer', default: 0, select: false })
   credentialVersion: number;
 
@@ -61,7 +61,6 @@ export class User {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  // @JoinTable() va en el lado desde donde normalmente “administras” la relación.
   @ManyToMany(() => Application, (application) => application.users)
   @JoinTable({
     name: 'user_applications',

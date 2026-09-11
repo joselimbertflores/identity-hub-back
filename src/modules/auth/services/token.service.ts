@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { JwtService } from '@nestjs/jwt';
 
@@ -40,10 +40,17 @@ redis.call('EXPIRE', KEYS[3], ARGV[3])
 return 1
 `;
 
+const REVOKE_USER_REFRESH_TOKENS_SCRIPT = `
+local tokens = redis.call('SMEMBERS', KEYS[1])
+for _, token in ipairs(tokens) do
+  redis.call('DEL', ARGV[1] .. token)
+end
+redis.call('DEL', KEYS[1])
+return #tokens
+`;
+
 @Injectable()
 export class TokenService {
-  private readonly logger = new Logger(TokenService.name);
-
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private jwtService: JwtService,
@@ -127,29 +134,13 @@ export class TokenService {
     return result === 1;
   }
 
-  async revokeAllForUser(userId: string) {
-    const setKey = this.buildUserRefreshTokensKey(userId);
-    const tokens = await this.redis.smembers(setKey);
-
-    const pipeline = this.redis.pipeline();
-
-    for (const token of tokens) {
-      pipeline.del(this.buildRefreshTokenKey(token));
-    }
-
-    pipeline.del(setKey);
-    const results = await pipeline.exec();
-    if (!results || results.some(([error]) => error !== null)) {
-      throw new Error('Refresh token revocation failed');
-    }
-  }
-
-  async revokeAllForUserBestEffort(userId: string): Promise<void> {
-    try {
-      await this.revokeAllForUser(userId);
-    } catch {
-      this.logger.warn('Refresh token cleanup failed after credential change');
-    }
+  async revokeAllRefreshTokensForUser(userId: string): Promise<void> {
+    await this.redis.eval(
+      REVOKE_USER_REFRESH_TOKENS_SCRIPT,
+      1,
+      this.buildUserRefreshTokensKey(userId),
+      REFRESH_TOKEN_KEY_PREFIX,
+    );
   }
 
   private buildRefreshTokenKey(refreshToken: string): string {

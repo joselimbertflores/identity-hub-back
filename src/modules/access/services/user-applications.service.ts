@@ -7,8 +7,6 @@ import { Application } from '../entities';
 
 @Injectable()
 export class UserApplicationsService {
-  constructor() {}
-
   async syncApplications(userId: string, applicationIds: number[], manager: EntityManager): Promise<void> {
     const appRepository = manager.getRepository(Application);
 

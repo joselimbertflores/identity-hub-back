@@ -32,7 +32,7 @@ export class CreateUserDto {
   @IsArray()
   @IsEnum(UserRole, {
     each: true,
-    message: 'Each value must be a valid transaction type.',
+    message: 'Each value must be a valid user role.',
   })
   roles?: UserRole[];
 

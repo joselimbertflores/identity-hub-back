@@ -4,7 +4,15 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { AuthService, JwksService, OAuthService, PasswordActionService, PkceService, TokenService } from './services';
+import {
+  AuthService,
+  JwksService,
+  OAuthService,
+  PasswordActionService,
+  PkceService,
+  SessionService,
+  TokenService,
+} from './services';
 import { OAuthController, AuthController, JwksController } from './controllers';
 import { readJwtKey } from './config/jwt.config';
 import { OAUTH_JWT_KEY_ID } from './constants/oauth.constants';
@@ -20,6 +28,7 @@ import { MailModule } from '../mail';
   controllers: [OAuthController, AuthController, JwksController],
   providers: [
     AuthService,
+    SessionService,
     OAuthService,
     TokenService,
     PasswordActionService,
@@ -54,6 +63,6 @@ import { MailModule } from '../mail';
     MailModule,
     TypeOrmModule.forFeature([PasswordActionToken]),
   ],
-  exports: [PasswordActionService, TokenService],
+  exports: [AuthService, PasswordActionService],
 })
 export class AuthModule {}

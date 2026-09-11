@@ -1,7 +1,6 @@
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { RedisModule } from '@nestjs-modules/ioredis';
-import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -43,7 +42,6 @@ import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from './config/rate-limit.config';
       },
       inject: [ConfigService],
     }),
-    CacheModule.register({ isGlobal: true }),
     ThrottlerModule.forRoot([
       {
         ttl: RATE_LIMIT_TTL_MS,

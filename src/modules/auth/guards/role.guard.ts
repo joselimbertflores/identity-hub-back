@@ -3,7 +3,8 @@ import { Reflector } from '@nestjs/core';
 
 import type { Request } from 'express';
 
-import { User, UserRole } from 'src/modules/users/entities';
+import { UserRole } from 'src/modules/users/entities';
+import type { AuthUser } from '../interfaces';
 import { REQUIRED_ROLE } from '../decorators';
 
 @Injectable()
@@ -19,7 +20,7 @@ export class RoleGuard implements CanActivate {
     if (!requiredRole) return true;
 
     const req: Request = context.switchToHttp().getRequest();
-    const user = req['user'] as User | undefined;
+    const user = req['user'] as AuthUser | undefined;
 
     if (!user) throw new InternalServerErrorException('User is not authenticated');
 

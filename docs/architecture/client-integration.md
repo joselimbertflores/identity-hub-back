@@ -92,7 +92,7 @@ Antes de aceptar el token, el backend cliente debe:
 
 No basta con decodificar el JWT. El claim `clientId` tampoco sustituye la validación de `aud`.
 
-Para vincular un usuario local, se recomienda guardar `externalKey`. Es estable para la integración y también aparece en el directorio interno. `name` es solo un dato visible y puede cambiar; email y roles no están incluidos en el token. `sub` es el UUID interno de la instancia del Hub y no debe sustituir a `externalKey` en sincronizaciones entre sistemas.
+Para vincular un usuario local se debe guardar `externalKey`: identifica de forma estable la cuenta de Identity Hub y también aparece en el directorio interno. `relationKey` es un vínculo opcional con la persona o funcionario institucional y puede usarse para reconciliación con ese sistema de origen. `login` sirve para autenticarse, no como clave de integración. `name` es solo un dato visible y puede cambiar; email y roles no están incluidos en el token. `sub` es el UUID interno de la instancia del Hub y no debe sustituir a `externalKey` en sincronizaciones entre sistemas.
 
 ## 6. Directorio interno opcional
 
@@ -105,18 +105,19 @@ Un backend cliente puede consultar los usuarios activos que Identity Hub le ha a
 
 Estas rutas son servidor a servidor, no usan la cookie SSO y siempre requieren HTTP Basic con las credenciales de la aplicación, independientemente de su tipo OAuth. La aplicación autenticada determina el filtro; no se puede consultar la asignación de otro cliente.
 
-La respuesta expone solo:
+La consulta individual expone solo:
 
 ```json
 {
   "externalKey": "IDH-U-...",
   "fullName": "Client User",
   "email": "user@example.org",
-  "login": "client.user"
+  "login": "client.user",
+  "relationKey": "institutional-person-key"
 }
 ```
 
-El cliente puede usar este contrato para crear o actualizar su usuario local. Sus roles y permisos siguen siendo responsabilidad propia.
+La consulta individual por `externalKey` incluye `relationKey`; el listado no lo expone. El cliente puede usar este contrato para crear o actualizar su usuario local. Sus roles y permisos siguen siendo responsabilidad propia.
 
 ## 7. Logout del cliente
 
@@ -130,5 +131,5 @@ El cliente siempre debe eliminar su sesión y sus tokens locales. El logout cent
 - Canjear y refrescar con formulario URL-encoded.
 - Reemplazar el refresh token después de cada rotación.
 - Validar JWKS, RS256, `kid`, `iss`, `aud` y `exp`.
-- Usar `externalKey` para el vínculo estable del usuario.
+- Usar `externalKey`, no `login`, para el vínculo estable del usuario.
 - Mantener sesión, roles y logout propios.

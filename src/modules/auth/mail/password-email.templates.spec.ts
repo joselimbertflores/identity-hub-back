@@ -16,22 +16,32 @@ describe('password email templates', () => {
   }
 
   it('builds the initial password setup email', () => {
-    const email = buildPasswordActionEmail('User & <Admin>', createAction(PasswordActionPurpose.INITIAL_SETUP));
+    const email = buildPasswordActionEmail(
+      { fullName: 'User & <Admin>', login: 'admin<&>' },
+      createAction(PasswordActionPurpose.INITIAL_SETUP),
+    );
 
     expect(email.subject).toBe('Configura tu contraseña de Identity Hub');
     expect(email.text).toContain('Usa el siguiente enlace para configurar tu contraseña inicial:');
     expect(email.text).toContain(actionUrl);
+    expect(email.text).toContain('Tu usuario de Identity Hub es: admin<&>');
+    expect(email.html).toContain('admin&lt;&amp;&gt;');
     expect(email.html).toContain('User &amp; &lt;Admin&gt;');
     expect(email.html).toContain('code=&lt;code&gt;&amp;source=&quot;email&quot;');
     expect(email.html).toContain(expiresAt.toISOString());
   });
 
   it('builds the password reset email', () => {
-    const email = buildPasswordActionEmail('Client User', createAction(PasswordActionPurpose.PASSWORD_RESET));
+    const email = buildPasswordActionEmail(
+      { fullName: 'Client User', login: 'client.user' },
+      createAction(PasswordActionPurpose.PASSWORD_RESET),
+    );
 
     expect(email.subject).toBe('Restablece tu contraseña de Identity Hub');
     expect(email.text).toContain('Usa el siguiente enlace para restablecer tu contraseña:');
     expect(email.html).toContain('Usa el siguiente enlace para restablecer tu contraseña:');
+    expect(email.text).toContain('Tu usuario de Identity Hub es: client.user');
+    expect(email.html).toContain('client.user');
   });
 
   it('builds the password changed email', () => {

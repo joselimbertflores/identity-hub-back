@@ -38,6 +38,16 @@ Identity Hub no conoce los roles internos ni las reglas de negocio de los client
 
 Los usuarios solo pueden obtener o refrescar credenciales para aplicaciones activas a las que estén asignados. La asignación también limita el directorio interno que puede consultar cada sistema consumidor.
 
+## Identidad del usuario
+
+Los tres identificadores tienen propósitos distintos:
+
+- `externalKey` identifica de forma estable la cuenta de Identity Hub y es la clave que deben persistir las aplicaciones cliente;
+- `relationKey` vincula opcionalmente esa cuenta con la persona o funcionario del sistema institucional de origen;
+- `login` sirve para autenticarse y puede cambiar, por lo que no debe usarse como clave de integración.
+
+`mustChangePassword` describe solo una restricción actual: el usuario debe cambiar su contraseña antes de continuar normalmente. No registra si la cuenta fue configurada por primera vez ni conserva historial.
+
 ## Administración
 
 Un administrador registra una aplicación desde Identity Hub con:
@@ -50,9 +60,11 @@ Un administrador registra una aplicación desde Identity Hub con:
 
 Las aplicaciones son confidenciales por defecto. Al crear o regenerar una aplicación, el secreto se devuelve una sola vez y se guarda en PostgreSQL únicamente como hash. El administrador debe transferirlo al backend cliente mediante un canal seguro.
 
-Los usuarios se crean junto con sus asignaciones. No reciben una contraseña temporal conocida: Identity Hub genera una credencial interna no utilizable y crea una acción de configuración inicial de un solo uso. La acción se envía por correo o se entrega manualmente si no existe correo o falla SMTP. Un administrador puede reenviar una acción pendiente; el nuevo código conserva su propósito y reemplaza al anterior con una nueva expiración.
+Los usuarios se crean junto con sus asignaciones. No reciben una contraseña temporal conocida: Identity Hub genera una credencial interna no utilizable y crea una acción `INITIAL_SETUP` de un solo uso. El alta administrativa normal requiere correo y nunca expone el código en la respuesta; si SMTP falla informa el fallo de entrega para poder reintentar. La importación controlada puede aprovisionar cuentas sin notificación ni acción. Un administrador puede reenviar una acción pendiente; el nuevo código conserva su propósito y reemplaza al anterior con una nueva expiración.
 
-Desactivar un usuario incrementa la versión de credencial y elimina, como limpieza adicional, sus refresh tokens indexados; reactivarlo no restaura los tokens emitidos antes de la desactivación. Un reset administrativo invalida la contraseña, exige establecer una nueva y revoca lógicamente los refresh tokens mediante la versión de credencial. La recuperación pública solo crea una acción para un usuario activo con correo y responde siempre con un mensaje neutro; no invalida la credencial actual hasta que se consume la acción. Completar una acción no inicia una sesión. Establecer una contraseña, mediante enlace o cambio autenticado, elimina cualquier acción pendiente del usuario.
+Desactivar un usuario incrementa `credentialVersion`. Un reset administrativo invalida la contraseña actual, marca que debe cambiarse e incrementa la misma versión. En ambos casos, las sesiones SSO y los refresh tokens anteriores dejan de ser válidos por comparación con PostgreSQL; su eliminación en Redis es una limpieza posterior de mejor esfuerzo. Reactivar al usuario no restaura credenciales anteriores.
+
+La recuperación pública solo crea una acción `PASSWORD_RESET` para un único usuario activo con correo y responde siempre con un mensaje neutro; no invalida la credencial actual hasta que se consume la acción. Completar cualquier acción actualiza la contraseña, incrementa `credentialVersion`, elimina las acciones pendientes y no inicia sesión. `PasswordActionToken` es autorización efímera, no historial ni estado permanente de la cuenta.
 
 ## Configuración y seguridad
 

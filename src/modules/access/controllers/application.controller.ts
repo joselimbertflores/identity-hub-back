@@ -22,8 +22,8 @@ export class ApplicationController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: string, @Body() updateClientDto: UpdateClientDto) {
-    return this.applicationService.update(+id, updateClientDto);
+  update(@Param('id', ParseIntPipe) id: number, @Body() updateClientDto: UpdateClientDto) {
+    return this.applicationService.update(id, updateClientDto);
   }
 
   @Post(':id/regenerate-secret')

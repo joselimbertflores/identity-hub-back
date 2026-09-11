@@ -4,3 +4,4 @@ export * from './token.service';
 export * from './jwks.service';
 export * from './pkce.service';
 export * from './password-action.service';
+export * from './session.service';

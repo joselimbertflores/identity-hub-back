@@ -16,6 +16,8 @@ La sesión de Identity Hub vive en Redis y se referencia mediante la cookie `ses
 
 Esta cookie solo autentica al navegador frente a Identity Hub. Después del callback, el backend cliente debe crear y proteger una sesión local. Cerrar una de estas sesiones no elimina automáticamente la otra.
 
+Redis guarda cada sesión como `session:<id>` y mantiene `user_sessions:<userId>` únicamente como índice de limpieza. La sesión contiene el usuario y la `credentialVersion` con la que fue emitida; PostgreSQL se consulta en cada uso y sigue siendo la autoridad sobre actividad, roles, cambio obligatorio y versión vigente.
+
 ## Flujo principal
 
 ```mermaid
@@ -99,7 +101,7 @@ Para canjear el code se revalidan:
 
 El access token dura 10 minutos. El refresh token dura 10 horas, se guarda en Redis y rota en cada uso. El code y los refresh tokens se consumen de forma atómica; ante dos usos concurrentes solo uno puede tener éxito.
 
-Un cambio o reset de contraseña, y la transición de usuario activo a inactivo, incrementan la versión interna de la credencial. Los refresh tokens anteriores dejan de ser utilizables aunque falle su eliminación física en Redis y no recuperan validez si el usuario se reactiva. Esta versión se compara únicamente durante el refresh: no forma parte del access token ni de la sesión SSO. Los access tokens ya emitidos no tienen blacklist y siguen siendo válidos hasta `exp`.
+Un cambio o reset de contraseña, y la transición de usuario activo a inactivo, incrementan `credentialVersion` en PostgreSQL. La versión emitida se incluye en sesiones SSO, authorization codes y refresh tokens; cada artefacto se rechaza si ya no coincide. Por eso las sesiones y refresh tokens anteriores dejan de ser utilizables aunque falle su eliminación física en Redis y no recuperan validez si el usuario se reactiva. La versión no forma parte del access token: los JWT ya emitidos no tienen blacklist y siguen siendo válidos hasta `exp`.
 
 ## Tokens e identidad
 
@@ -119,14 +121,14 @@ No contiene roles, correo, `scope`, `mustChangePassword` ni versión de credenci
 
 ## Contraseñas y sesión
 
-- La configuración inicial y los resets administrativos crean acciones con expiración y de un solo uso en PostgreSQL. Solo se persiste el hash del código.
+- `INITIAL_SETUP` invita a configurar una cuenta recién aprovisionada; `PASSWORD_RESET` recupera o restablece el acceso. Ambas son autorizaciones de un solo uso con expiración en PostgreSQL y solo se persiste el hash del código.
 - Reenviar una acción pendiente conserva su propósito, renueva su expiración e invalida el código anterior.
 - La recuperación pública responde de forma neutra y solo envía correo a usuarios activos con correo registrado.
-- Completar una acción establece la contraseña, elimina acciones pendientes y revoca refresh tokens, pero no crea sesión ni reanuda OAuth.
-- El cambio autenticado elimina acciones pendientes, conserva la sesión central y puede reanudar una autorización pendiente.
+- Completar una acción establece la contraseña, elimina acciones pendientes e invalida sesiones y refresh tokens previos, pero no crea sesión ni reanuda OAuth.
+- El cambio autenticado elimina acciones pendientes, invalida las sesiones previas, crea una sesión central nueva y puede reanudar una autorización pendiente.
 
 ## Logout
 
-`POST /api/auth/logout` elimina la sesión central y revoca todos los refresh tokens indexados para el usuario, incluidos los emitidos para otros clientes. La cookie se limpia con los mismos atributos usados al crearla.
+`POST /api/auth/logout` valida la sesión presentada, elimina esa sesión central y revoca todos los refresh tokens indexados para el usuario, incluidos los emitidos para otros clientes. Una cookie obsoleta se limpia sin poder revocar credenciales nuevas. La cookie se elimina con los mismos atributos usados al crearla.
 
 No existe logout federado ni endpoint de cierre con callback. Identity Hub no borra sesiones, cookies o tokens almacenados por los clientes. Cada cliente debe cerrar su propia sesión y descartar sus credenciales locales. Los access tokens emitidos antes del logout siguen siendo válidos hasta su expiración.

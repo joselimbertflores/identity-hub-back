@@ -21,7 +21,7 @@ import { AuthorizeParamsDto, GrantType, LoginDto, LoginParamsDto, TokenRequestDt
 import { AuthException } from '../exceptions/auth.exception';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Cookies, Public } from '../decorators';
-import { OAuthService } from '../services';
+import { AuthService, OAuthService } from '../services';
 import { OAuthTokenResponse, TokenClientAuthentication } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
@@ -38,6 +38,7 @@ interface BasicClientCredentials {
 @Controller('oauth')
 export class OAuthController {
   constructor(
+    private readonly authService: AuthService,
     private readonly oauthService: OAuthService,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
   ) {}
@@ -62,7 +63,7 @@ export class OAuthController {
     const sameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
 
     try {
-      const { sessionId, mustChangePassword } = await this.oauthService.authenticateAndCreateSession(body);
+      const { sessionId, mustChangePassword } = await this.authService.signIn(body);
       res.cookie(SESSION_COOKIE_NAME, sessionId, buildSessionCookieOptions(secure, sameSite));
 
       const redirectUrl = await this.oauthService.resolvePostLoginRedirect(queryParams, sessionId, mustChangePassword);

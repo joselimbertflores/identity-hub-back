@@ -7,7 +7,7 @@ import { Repository } from 'typeorm';
 import { compare } from 'bcrypt';
 import Redis from 'ioredis';
 
-import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, LoginDto, GrantType } from '../dtos';
+import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, GrantType } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Application } from 'src/modules/access/entities';
@@ -50,8 +50,8 @@ export class OAuthService {
       });
     }
 
-    const session = sessionId ? await this.authService.getAuthSession(sessionId) : null;
-    if (!session) {
+    const authenticatedSession = sessionId ? await this.authService.getValidatedSession(sessionId) : null;
+    if (!authenticatedSession) {
       const authRequestId = await this.createPendingAuthRequest(params);
 
       return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.LOGIN, {
@@ -59,29 +59,23 @@ export class OAuthService {
       });
     }
 
-    const activeUser = await this.authService.findActiveUser(session.userId);
-    if (activeUser?.mustChangePassword) {
+    const { session, user: sessionUser } = authenticatedSession;
+    if (sessionUser.mustChangePassword) {
       const authRequestId = await this.createPendingAuthRequest(params, sessionId);
       return this.buildPasswordChangeRedirectUrl(authRequestId);
     }
 
-    const user = await this.authService.findUserEligibleForOAuthCredentials(session.userId, app.id);
-    if (!user) {
+    const user = await this.authService.findUserEligibleForOAuthCredentials(sessionUser.id, app.id);
+    if (!user || user.credentialVersion !== session.credentialVersion) {
       return this.buildClientRedirectUrl(params.redirectUri, {
         error: 'access_denied',
         state: params.state,
       });
     }
 
-    const code = await this.createAuthorizationCode(user.id, params);
+    const code = await this.createAuthorizationCode(user.id, user.credentialVersion, params);
 
     return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
-  }
-
-  async authenticateAndCreateSession(dto: LoginDto): Promise<{ sessionId: string; mustChangePassword: boolean }> {
-    const user = await this.authService.authenticateUser(dto);
-    const sessionId = await this.authService.createAuthSession(user);
-    return { sessionId, mustChangePassword: user.mustChangePassword };
   }
 
   async handleTokenRequest(
@@ -160,7 +154,7 @@ export class OAuthService {
     this.pkceService.verifyCodeVerifier(dto.codeVerifier, context.codeChallenge, context.codeChallengeMethod);
 
     const user = await this.authService.findUserEligibleForOAuthCredentials(context.userId, app.id);
-    if (!user) {
+    if (!user || !Number.isInteger(context.credentialVersion) || user.credentialVersion !== context.credentialVersion) {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
@@ -231,12 +225,14 @@ export class OAuthService {
 
   private async createAuthorizationCode(
     userId: string,
+    credentialVersion: number,
     { clientId, redirectUri, codeChallenge, codeChallengeMethod }: AuthorizeParamsDto,
   ) {
     const code = crypto.randomUUID();
     const key = `${AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthorizationCodePayload = {
       userId,
+      credentialVersion,
       clientId,
       redirectUri,
       codeChallenge,

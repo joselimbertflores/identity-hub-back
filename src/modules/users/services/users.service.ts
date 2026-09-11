@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
-import { EntityManager, ILike, In, QueryFailedError, Repository } from 'typeorm';
+import { Brackets, EntityManager, ILike, In, MoreThan, QueryFailedError, Repository } from 'typeorm';
 import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
@@ -46,9 +46,10 @@ export class UsersService {
       },
     });
 
+    const now = new Date();
     const passwordActions = users.length
       ? await this.passwordActionRepository.find({
-          where: { userId: In(users.map(({ id }) => id)) },
+          where: { userId: In(users.map(({ id }) => id)), expiresAt: MoreThan(now) },
           select: { userId: true, purpose: true, expiresAt: true },
         })
       : [];
@@ -69,11 +70,17 @@ export class UsersService {
     const repository = manager ? manager.getRepository(User) : this.userRepository;
     const email = this.normalizeEmail(dto.email);
 
-    const duplicateQuery = repository.createQueryBuilder('user').where('user.login = :login', { login: dto.login });
-    if (email) {
-      duplicateQuery.orWhere('user.email = :email', { email });
-    }
-    const duplicate = await duplicateQuery.getOne();
+    const duplicate = await repository
+      .createQueryBuilder('user')
+      .where(
+        new Brackets((where) => {
+          where.where('user.login = :login OR user.email = :login', { login: dto.login });
+          if (email) {
+            where.orWhere('user.email = :email OR user.login = :email', { email });
+          }
+        }),
+      )
+      .getOne();
     if (duplicate) {
       throw new ConflictException('Login or email already exists');
     }
@@ -100,13 +107,16 @@ export class UsersService {
     dto: UpdateUserDto,
     manager?: EntityManager,
   ): Promise<{ user: User; credentialsInvalidated: boolean }> {
-    const repository = manager ? manager.getRepository(User) : this.userRepository;
+    if (!manager) {
+      return this.userRepository.manager.transaction((transactionManager) => this.update(id, dto, transactionManager));
+    }
+    const repository = manager.getRepository(User);
 
     const userQuery = repository
       .createQueryBuilder('user')
       .addSelect('user.credentialVersion')
-      .where('user.id = :id', { id });
-    if (manager) userQuery.setLock('pessimistic_write');
+      .where('user.id = :id', { id })
+      .setLock('pessimistic_write');
 
     const userDB = await userQuery.getOne();
 
@@ -115,16 +125,26 @@ export class UsersService {
     const credentialsInvalidated = userDB.isActive && dto.isActive === false;
 
     const email = Object.hasOwn(dto, 'email') ? this.normalizeEmail(dto.email) : undefined;
-    if ((dto.login && userDB.login !== dto.login) || (email !== undefined && userDB.email !== email)) {
-      const duplicateQuery = repository.createQueryBuilder('user').where('user.id != :id', { id });
-      if (dto.login) {
-        duplicateQuery.andWhere('(user.login = :login OR user.email = :email)', {
-          login: dto.login,
-          email: email ?? '__no_email__',
-        });
-      } else {
-        duplicateQuery.andWhere('user.email = :email', { email });
-      }
+    const emailChanged = email !== undefined && userDB.email !== email;
+    const loginChanged = dto.login !== undefined && userDB.login !== dto.login;
+    if (loginChanged || (emailChanged && email)) {
+      const duplicateQuery = repository
+        .createQueryBuilder('user')
+        .where('user.id != :id', { id })
+        .andWhere(
+          new Brackets((where) => {
+            if (loginChanged) {
+              where.where('user.login = :login OR user.email = :login', { login: dto.login });
+            }
+            if (emailChanged && email) {
+              if (loginChanged) {
+                where.orWhere('user.email = :email OR user.login = :email', { email });
+              } else {
+                where.where('user.email = :email OR user.login = :email', { email });
+              }
+            }
+          }),
+        );
       const duplicate = await duplicateQuery.getOne();
 
       if (duplicate) throw new ConflictException('Login or email already exists');
@@ -135,25 +155,25 @@ export class UsersService {
     if (credentialsInvalidated) userDB.credentialVersion += 1;
 
     try {
-      return { user: await repository.save(userDB), credentialsInvalidated };
+      const user = await repository.save(userDB);
+      if (emailChanged || credentialsInvalidated) {
+        await manager.getRepository(PasswordActionToken).delete({ userId: id });
+      }
+      return { user, credentialsInvalidated };
     } catch (error: unknown) {
       this.rethrowUniqueConflict(error);
     }
-  }
-
-  async findByExternalKey(id: string) {
-    return this.userRepository.findOne({ where: { externalKey: id } });
   }
 
   async prepareUnknownPasswordHash(): Promise<string> {
     return this.encryptPassword(this.generateUnknownPassword());
   }
 
-  async setUnknownPasswordForReset(
+  async invalidateCredentialsForPasswordReset(
     id: string,
     passwordHash: string,
     manager: EntityManager,
-  ): Promise<Pick<User, 'id' | 'email' | 'fullName'>> {
+  ): Promise<Pick<User, 'id' | 'email' | 'fullName' | 'login'>> {
     const repository = manager.getRepository(User);
     const user = await repository
       .createQueryBuilder('user')
@@ -172,14 +192,14 @@ export class UsersService {
     user.credentialVersion += 1;
     await repository.save(user);
 
-    return { id: user.id, email: user.email, fullName: user.fullName };
+    return { id: user.id, email: user.email, fullName: user.fullName, login: user.login };
   }
 
-  async changePassword(
+  async applyAuthenticatedPasswordChange(
     id: string,
     currentPassword: string,
     newPassword: string,
-  ): Promise<Pick<User, 'id' | 'email' | 'fullName'>> {
+  ): Promise<Pick<User, 'id' | 'email' | 'fullName' | 'credentialVersion'>> {
     const currentUser = await this.userRepository
       .createQueryBuilder('user')
       .addSelect(['user.password', 'user.credentialVersion'])
@@ -220,7 +240,7 @@ export class UsersService {
       await repository.save(user);
       await manager.getRepository(PasswordActionToken).delete({ userId: user.id });
 
-      return { id: user.id, email: user.email, fullName: user.fullName };
+      return { id: user.id, email: user.email, fullName: user.fullName, credentialVersion: user.credentialVersion };
     });
   }
 

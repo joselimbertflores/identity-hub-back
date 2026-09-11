@@ -5,7 +5,6 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Logger,
   Patch,
   Post,
   Query,
@@ -18,34 +17,45 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 
 import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
-import { UsersService } from 'src/modules/users/services/users.service';
 import { EnvironmentVariables } from 'src/config';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto, CompletePasswordActionDto, ForgotPasswordDto, LoginParamsDto } from '../dtos';
-import { AuthService, OAuthService, PasswordActionService, TokenService } from '../services';
-import { buildSessionCookieClearOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
+import { AuthService, OAuthService, PasswordActionService } from '../services';
+import {
+  buildSessionCookieClearOptions,
+  buildSessionCookieOptions,
+  SESSION_COOKIE_NAME,
+} from '../constants/session.constants';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
-import { buildPasswordChangedEmail } from '../mail/password-email.templates';
-import { MailService } from 'src/modules/mail';
 
 @Controller('auth')
 export class AuthController {
-  private readonly logger = new Logger(AuthController.name);
-
   constructor(
     private readonly authService: AuthService,
-    private readonly userService: UsersService,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly oauthService: OAuthService,
     private readonly passwordActionService: PasswordActionService,
-    private readonly tokenService: TokenService,
-    private readonly mailService: MailService,
   ) {}
 
   @AllowPasswordChange()
   @Get('status')
   checkAuthStatus(@GetAuthUser() user: AuthUser) {
     return { user };
+  }
+
+  @AllowPasswordChange()
+  @Get('oauth/resume')
+  async resumeOAuth(
+    @GetAuthUser() user: AuthUser,
+    @Query() queryParams: LoginParamsDto,
+    @Cookies(SESSION_COOKIE_NAME) sessionId: string,
+  ) {
+    const redirectUrl = await this.oauthService.resolvePostLoginRedirect(
+      queryParams,
+      sessionId,
+      user.mustChangePassword,
+    );
+    return { redirectUrl };
   }
 
   @Public()
@@ -56,7 +66,7 @@ export class AuthController {
   ) {
     const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
     const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
-    const result = await this.authService.removeAuthSession(sessionId);
+    const result = await this.authService.logout(sessionId);
     response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure, cookieSameSite));
     return result;
   }
@@ -68,22 +78,20 @@ export class AuthController {
     @Body() body: ChangePasswordDto,
     @Query() queryParams: LoginParamsDto,
     @Cookies(SESSION_COOKIE_NAME) sessionId: string,
+    @Res({ passthrough: true }) response: Response,
   ) {
     if (body.newPassword !== body.passwordConfirmation) {
       throw new BadRequestException('Password confirmation does not match.');
     }
 
-    const user = await this.userService.changePassword(userId, body.currentPassword, body.newPassword);
-    await this.tokenService.revokeAllForUserBestEffort(userId);
-    if (user.email) {
-      try {
-        const email = buildPasswordChangedEmail(user.fullName);
-        await this.mailService.send({ to: user.email, ...email });
-      } catch {
-        this.logger.warn('Password change notification delivery failed');
-      }
-    }
-
+    const { sessionId: newSessionId } = await this.authService.completeAuthenticatedPasswordChange(
+      userId,
+      body.currentPassword,
+      body.newPassword,
+    );
+    const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
+    const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
+    response.cookie(SESSION_COOKIE_NAME, newSessionId, buildSessionCookieOptions(cookieSecure, cookieSameSite));
     const redirectUrl = await this.oauthService.resumeAuthorizeFlow(queryParams, sessionId);
     return { message: 'Password changed successfully', redirectUrl };
   }
@@ -104,6 +112,6 @@ export class AuthController {
   @Post('password-actions/complete')
   @HttpCode(HttpStatus.OK)
   completePasswordAction(@Body() body: CompletePasswordActionDto) {
-    return this.passwordActionService.complete(body);
+    return this.passwordActionService.completePasswordAction(body);
   }
 }
