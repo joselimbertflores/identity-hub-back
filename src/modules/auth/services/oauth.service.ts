@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -6,13 +6,14 @@ import { ConfigService } from '@nestjs/config';
 import { In, Repository } from 'typeorm';
 import Redis from 'ioredis';
 
-import { LoginParamsDto, AuthorizeParamsDto, LogoutParamsDto } from '../dtos';
+import { LoginParamsDto, AuthorizeParamsDto } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
 import { Application } from 'src/modules/access/entities';
 import { PendingAuthorizationRequest } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
+import { SessionService } from './session.service';
 import { UsersService } from 'src/modules/users/services';
 import {
   BACKCHANNEL_LOGOUT_TIMEOUT_MS,
@@ -31,6 +32,7 @@ export class OAuthService {
     private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly tokenService: TokenService,
     private readonly authService: AuthService,
+    private readonly sessionService: SessionService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -77,16 +79,6 @@ export class OAuthService {
     return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
   }
 
-  async handleLogoutRequest(params: LogoutParamsDto, sessionId: string | undefined): Promise<string> {
-    const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
-    if (!app || app.postLogoutRedirectUri !== params.postLogoutRedirectUri) {
-      throw new BadRequestException('Invalid logout request');
-    }
-
-    await this.logout(sessionId);
-    return app.postLogoutRedirectUri;
-  }
-
   async logout(sessionId: string | undefined) {
     const revokedSession = await this.authService.logout(sessionId);
     if (revokedSession) {
@@ -97,6 +89,16 @@ export class OAuthService {
       ok: true,
       message: revokedSession ? 'Logout successful' : 'Session is already logged out',
     };
+  }
+
+  async logoutBySid(sid: string, requestingClientId: string) {
+    const revokedSession = await this.sessionService.removeBySid(sid, requestingClientId);
+    if (!revokedSession) {
+      throw new NotFoundException('Session not found or unavailable for this client');
+    }
+
+    await this.notifyBackchannelLogout(revokedSession.sid, revokedSession.clientIds);
+    return { ok: true, message: 'Logout successful' };
   }
 
   async resolvePostLoginRedirect(

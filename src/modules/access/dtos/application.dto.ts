@@ -57,10 +57,6 @@ export class CreateApplicationDto {
   @IsOptional()
   backchannelLogoutUri?: string | null;
 
-  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
-  @IsOptional()
-  postLogoutRedirectUri?: string | null;
-
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;

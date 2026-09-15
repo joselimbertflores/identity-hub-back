@@ -7,10 +7,13 @@ import Redis from 'ioredis';
 import { AuthSessionPayload, isAuthSessionPayload, RevokedSessionContext } from '../interfaces';
 import {
   buildSessionBySidKey,
+  buildSessionClientsKey,
   buildSessionRedisKey,
   SESSION_BY_SID_KEY_PREFIX,
   SESSION_CLIENTS_KEY_PREFIX,
+  SESSION_REDIS_KEY_PREFIX,
   SESSION_TTL_SECONDS,
+  USER_SESSIONS_KEY_PREFIX,
 } from '../constants/session.constants';
 
 const CREATE_SESSION_SCRIPT = `
@@ -40,6 +43,34 @@ local clientsKey = ARGV[3] .. session.sid
 local clients = redis.call('SMEMBERS', clientsKey)
 redis.call('DEL', KEYS[1], ARGV[2] .. session.sid, clientsKey)
 redis.call('ZREM', KEYS[2], KEYS[1])
+local result = {session.sid, session.userId}
+for _, clientId in ipairs(clients) do
+  table.insert(result, clientId)
+end
+return result
+`;
+
+const REMOVE_SESSION_BY_SID_SCRIPT = `
+local sessionKey = redis.call('GET', KEYS[1])
+if not sessionKey or string.sub(sessionKey, 1, string.len(ARGV[3])) ~= ARGV[3] then
+  return nil
+end
+local raw = redis.call('GET', sessionKey)
+if not raw then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return nil
+end
+local ok, session = pcall(cjson.decode, raw)
+if not ok or type(session) ~= 'table' or session.sid ~= ARGV[1]
+  or type(session.userId) ~= 'string' then
+  return nil
+end
+if redis.call('SISMEMBER', KEYS[2], ARGV[2]) ~= 1 then
+  return nil
+end
+local clients = redis.call('SMEMBERS', KEYS[2])
+redis.call('DEL', sessionKey, KEYS[1], KEYS[2])
+redis.call('ZREM', ARGV[4] .. session.userId, sessionKey)
 local result = {session.sid, session.userId}
 for _, clientId in ipairs(clients) do
   table.insert(result, clientId)
@@ -110,6 +141,22 @@ export class SessionService {
     return { sid, userId: revokedUserId, clientIds };
   }
 
+  async removeBySid(sid: string, requestingClientId: string): Promise<RevokedSessionContext | null> {
+    const result = (await this.redis.eval(
+      REMOVE_SESSION_BY_SID_SCRIPT,
+      2,
+      buildSessionBySidKey(sid),
+      buildSessionClientsKey(sid),
+      sid,
+      requestingClientId,
+      SESSION_REDIS_KEY_PREFIX,
+      USER_SESSIONS_KEY_PREFIX,
+    )) as string[] | null;
+    if (!result) return null;
+    const [revokedSid, userId, ...clientIds] = result;
+    return { sid: revokedSid, userId, clientIds };
+  }
+
   async revokeAllSessionsForUser(userId: string): Promise<void> {
     await this.redis.eval(
       REVOKE_USER_SESSIONS_SCRIPT,
@@ -121,6 +168,6 @@ export class SessionService {
   }
 
   private buildUserSessionsKey(userId: string): string {
-    return `user_sessions:${userId}`;
+    return `${USER_SESSIONS_KEY_PREFIX}${userId}`;
   }
 }

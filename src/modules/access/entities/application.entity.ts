@@ -41,9 +41,6 @@ export class Application {
   @Column('text', { nullable: true })
   backchannelLogoutUri: string | null;
 
-  @Column('text', { nullable: true })
-  postLogoutRedirectUri: string | null;
-
   @Column({ default: true })
   isActive: boolean;
 

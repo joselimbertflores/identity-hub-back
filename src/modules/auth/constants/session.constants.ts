@@ -7,6 +7,7 @@ export const SESSION_COOKIE_NAME = 'session_id';
 export const SESSION_REDIS_KEY_PREFIX = 'session:';
 export const SESSION_BY_SID_KEY_PREFIX = 'session_by_sid:';
 export const SESSION_CLIENTS_KEY_PREFIX = 'session_clients:';
+export const USER_SESSIONS_KEY_PREFIX = 'user_sessions:';
 
 export function buildSessionCookieOptions(secure: boolean, sameSite: IdentityCookieSameSite): CookieOptions {
   return {

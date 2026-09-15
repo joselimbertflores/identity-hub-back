@@ -13,7 +13,7 @@ import {
   SessionService,
   TokenService,
 } from './services';
-import { OAuthController, AuthController, JwksController } from './controllers';
+import { OAuthController, AuthController, InternalSessionController, JwksController } from './controllers';
 import { readJwtKey } from './config/jwt.config';
 import { OAUTH_JWT_KEY_ID } from './constants/oauth.constants';
 import { UsersModule } from '../users/users.module';
@@ -25,7 +25,7 @@ import { PasswordActionToken } from './entities';
 import { MailModule } from '../mail';
 
 @Module({
-  controllers: [OAuthController, AuthController, JwksController],
+  controllers: [OAuthController, AuthController, InternalSessionController, JwksController],
   providers: [
     AuthService,
     SessionService,

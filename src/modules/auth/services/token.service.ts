@@ -237,11 +237,17 @@ export class TokenService {
 
   createLogoutToken(sid: string, clientId: string): Promise<string> {
     return this.jwtService.signAsync(
-      { sid },
+      {
+        sid,
+        events: {
+          'http://schemas.openid.net/event/backchannel-logout': {},
+        },
+      },
       {
         audience: clientId,
         expiresIn: LOGOUT_TOKEN_TTL_SECONDS,
         jwtid: crypto.randomUUID(),
+        header: { alg: 'RS256', typ: 'logout+jwt' },
       },
     );
   }

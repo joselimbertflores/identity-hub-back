@@ -1,134 +1,67 @@
-# Flujo SSO y OAuth
+# SSO y Single Logout
 
-Identity Hub usa OAuth 2.0 Authorization Code con PKCE S256. El navegador transporta la cookie del Hub, pero el backend cliente controla el intento OAuth, recibe el callback y crea su propia sesión.
+SIAU mantiene una sesión central en Redis por cada inicio de sesión. Esa sesión contiene el usuario, la versión de sus credenciales, un `sid` y las aplicaciones que participaron mediante OAuth. Expira de forma absoluta a las 10 horas: su vigencia no se extiende con el uso.
 
-## Dos sesiones distintas
+`sessionId` y `sid` tienen propósitos distintos:
 
-La sesión de Identity Hub vive en Redis y se referencia mediante la cookie `session_id`:
+- `sessionId` es la credencial privada y aleatoria que SIAU guarda en la cookie HTTP-only `session_id`. No se entrega a las aplicaciones.
+- `sid` es un identificador de correlación compartido en los tokens. Permite relacionar la sesión central con las sesiones locales, pero no autentica por sí solo.
 
-| Propiedad  | Valor                       |
-| ---------- | --------------------------- |
-| Duración   | 10 horas                    |
-| `HttpOnly` | Siempre `true`              |
-| `Secure`   | `IDENTITY_COOKIE_SECURE`    |
-| `SameSite` | `IDENTITY_COOKIE_SAME_SITE` |
-| `Path`     | `/`                         |
-
-Esta cookie solo autentica al navegador frente a Identity Hub. Después del callback, el backend cliente debe crear y proteger una sesión local. Cerrar una de estas sesiones no elimina automáticamente la otra.
-
-Redis guarda cada sesión como `session:<id>` y mantiene `user_sessions:<userId>` únicamente como índice de limpieza. La sesión contiene el usuario y la `credentialVersion` con la que fue emitida; PostgreSQL se consulta en cada uso y sigue siendo la autoridad sobre actividad, roles, cambio obligatorio y versión vigente.
-
-## Flujo principal
+## Flujo SSO
 
 ```mermaid
 sequenceDiagram
-    participant B as Navegador
+    participant U as Navegador
     participant C as Backend cliente
-    participant H as Identity Hub
-    participant R as Redis
+    participant S as SIAU
 
-    B->>C: Iniciar sesión
-    C->>C: Generar state y PKCE
-    C-->>B: Redirect a /oauth/authorize
-    B->>H: Authorization request + cookie SSO
-    alt No existe sesión SSO
-        H->>R: Guardar solicitud pendiente (5 min)
-        H-->>B: Mostrar login del Hub
-        B->>H: Credenciales
-        H->>R: Crear sesión SSO
-    else Sesión SSO válida
-        H->>H: Reutilizar usuario autenticado
-    end
-    H->>H: Validar cliente, callback y asignación
-    H->>R: Guardar authorization code (5 min)
-    H-->>B: Redirect al callback con code y state
-    B->>C: Callback
-    C->>C: Validar y consumir state
-    C->>H: Canjear code + code_verifier
-    H->>R: Consumir code y guardar refresh token
-    H-->>C: Access token + refresh token
-    C-->>B: Crear sesión local
+    C-->>U: Redirigir a /oauth/authorize (state + PKCE)
+    U->>S: Authorize y cookie session_id
+    S-->>U: Redirect al callback con code
+    U->>C: Callback
+    C->>S: Canjear code + code_verifier
+    S-->>C: Access token (incluye sid) + refresh token
+    C->>C: Crear sesión local y guardar sid
 ```
 
-### 1. Authorization request
+El access token dura 10 minutos. El refresh token rota en cada uso y nunca puede superar la expiración absoluta de la sesión SIAU. El backend cliente crea y controla su propia sesión local después de validar el callback y los tokens.
 
-El backend cliente redirige el navegador a `GET /oauth/authorize` con:
+## Single Logout
 
-| Parámetro               | Regla                                                |
-| ----------------------- | ---------------------------------------------------- |
-| `response_type`         | Debe ser `code`.                                     |
-| `client_id`             | Debe identificar una aplicación activa.              |
-| `redirect_uri`          | Debe coincidir exactamente con una URI registrada.   |
-| `state`                 | Obligatorio; Identity Hub lo devuelve sin modificar. |
-| `code_challenge`        | PKCE, entre 43 y 128 caracteres permitidos.          |
-| `code_challenge_method` | Debe ser `S256`.                                     |
+El backend cliente inicia el cierre con `POST /internal/sessions/logout`, autenticándose con su `clientId` y client secret mediante HTTP Basic, y envía:
 
-`scope` no está soportado y se rechaza. Identity Hub valida la aplicación y el callback antes de cualquier redirección externa. Si alguno es inválido, muestra su propia pantalla de error y no utiliza la URI recibida.
+```json
+{ "sid": "<uuid>" }
+```
 
-### 2. Login o reutilización SSO
-
-Sin una sesión válida, Identity Hub guarda la solicitud validada en Redis durante cinco minutos y dirige al usuario a su UI de login. Tras autenticarlo, vincula la solicitud a la nueva sesión y la consume una sola vez al reanudar el authorize.
-
-Con una sesión SSO válida no vuelve a pedir credenciales. Revalida al usuario, la aplicación y su asignación, y continúa directamente. Así se obtiene SSO entre varios clientes sin compartir cookies ni sesiones locales entre ellos.
-
-Si el usuario debe cambiar su contraseña, conserva una sesión central restringida y la solicitud pendiente. La UI del Hub completa el cambio autenticado y usa el `redirectUrl` devuelto para reanudar el authorize. Si la solicitud vence, vuelve al home del Hub y el cliente debe iniciar un flujo nuevo.
-
-### 3. Callback
-
-Cuando el usuario es elegible, Identity Hub crea un authorization code de un solo uso, válido por cinco minutos, y redirige al callback registrado:
+SIAU exige que la aplicación esté activa, que el `sid` corresponda a una sesión vigente y que esa aplicación figure entre sus participantes. Entonces elimina únicamente esa sesión central y envía un `POST` a cada `backchannelLogoutUri` participante, incluido el cliente iniciador:
 
 ```text
-https://client.example/auth/callback?code=<code>&state=<state>
+Content-Type: application/x-www-form-urlencoded
+
+logout_token=<JWT>
 ```
 
-Si el usuario no es elegible o ya no existe su asignación, el callback validado recibe `error=access_denied` junto con `state`. Una aplicación inactiva se trata como cliente inválido antes de usar el callback.
+Los fallos de un receptor se registran, pero no revierten el cierre central. SIAU no dirige el navegador ni elimina su cookie desde esta petición backend-to-backend; una cookie antigua simplemente referencia una sesión inválida.
 
-El backend cliente compara `state` con el valor guardado y lo consume antes de canjear el code. Identity Hub no sustituye esta validación: `state` pertenece al contrato de seguridad entre el navegador y el cliente.
+## Integración de clientes
 
-### 4. Canje y refresh
+Cada cliente debe:
 
-`POST /oauth/token` acepta solo `application/x-www-form-urlencoded` y los grants `authorization_code` y `refresh_token`.
+- guardar el `sid` del access token dentro de su sesión local;
+- iniciar el logout autenticando su backend ante SIAU;
+- registrar y exponer un `backchannelLogoutUri` idempotente;
+- validar firma, algoritmo, issuer, audience y expiración del Logout Token;
+- eliminar todas sus sesiones locales asociadas al `sid` recibido.
 
-Un cliente confidencial se autentica con HTTP Basic. Un cliente público omite Basic e incluye `client_id` en el formulario. El secreto nunca se acepta en el body.
+SIAU firma access tokens y Logout Tokens con RS256 y publica las claves en `GET /.well-known/jwks.json`. El Logout Token usa el header `typ: logout+jwt`, dura 2 minutos y contiene `iss`, `aud` igual al `clientId` receptor, `iat`, `exp`, `jti`, `sid` y:
 
-Para canjear el code se revalidan:
+```json
+{
+  "events": {
+    "http://schemas.openid.net/event/backchannel-logout": {}
+  }
+}
+```
 
-- cliente activo y autenticación del cliente;
-- code no vencido ni consumido;
-- mismo `client_id` y `redirect_uri`;
-- `code_verifier` contra el challenge S256;
-- usuario activo, contraseña habilitada y asignación vigente.
-
-El access token dura 10 minutos. El refresh token dura 10 horas, se guarda en Redis y rota en cada uso. El code y los refresh tokens se consumen de forma atómica; ante dos usos concurrentes solo uno puede tener éxito.
-
-Un cambio o reset de contraseña, y la transición de usuario activo a inactivo, incrementan `credentialVersion` en PostgreSQL. La versión emitida se incluye en sesiones SSO, authorization codes y refresh tokens; cada artefacto se rechaza si ya no coincide. Por eso las sesiones y refresh tokens anteriores dejan de ser utilizables aunque falle su eliminación física en Redis y no recuperan validez si el usuario se reactiva. La versión no forma parte del access token: los JWT ya emitidos no tienen blacklist y siguen siendo válidos hasta `exp`.
-
-## Tokens e identidad
-
-El access token es un JWT RS256 con `kid=main-key`. Contiene:
-
-| Claim         | Uso                                                    |
-| ------------- | ------------------------------------------------------ |
-| `iss`         | Valor exacto de `IDENTITY_HUB_PUBLIC_URL`.             |
-| `aud`         | `clientId` del cliente receptor.                       |
-| `sub`         | UUID interno del usuario en esta instancia.            |
-| `externalKey` | Identificador estable para integrar el usuario.        |
-| `name`        | Nombre visible; puede cambiar.                         |
-| `clientId`    | Campo redundante; no sustituye la validación de `aud`. |
-| `iat`, `exp`  | Emisión y expiración.                                  |
-
-No contiene roles, correo, `scope`, `mustChangePassword` ni versión de credencial. La clave pública se publica en `GET /.well-known/jwks.json`.
-
-## Contraseñas y sesión
-
-- `INITIAL_SETUP` invita a configurar una cuenta recién aprovisionada; `PASSWORD_RESET` recupera o restablece el acceso. Ambas son autorizaciones de un solo uso con expiración en PostgreSQL y solo se persiste el hash del código.
-- Reenviar una acción pendiente conserva su propósito, renueva su expiración e invalida el código anterior.
-- La recuperación pública responde de forma neutra y solo envía correo a usuarios activos con correo registrado.
-- Completar una acción establece la contraseña, elimina acciones pendientes e invalida sesiones y refresh tokens previos, pero no crea sesión ni reanuda OAuth.
-- El cambio autenticado elimina acciones pendientes, invalida las sesiones previas, crea una sesión central nueva y puede reanudar una autorización pendiente.
-
-## Logout
-
-`POST /api/auth/logout` valida la sesión presentada, elimina esa sesión central y revoca todos los refresh tokens indexados para el usuario, incluidos los emitidos para otros clientes. Una cookie obsoleta se limpia sin poder revocar credenciales nuevas. La cookie se elimina con los mismos atributos usados al crearla.
-
-No existe logout federado ni endpoint de cierre con callback. Identity Hub no borra sesiones, cookies o tokens almacenados por los clientes. Cada cliente debe cerrar su propia sesión y descartar sus credenciales locales. Los access tokens emitidos antes del logout siguen siendo válidos hasta su expiración.
+No contiene `nonce`. La clave de `events` es el identificador estándar del evento; no es una URL que el cliente deba consultar.
