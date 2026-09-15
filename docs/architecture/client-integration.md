@@ -12,6 +12,7 @@ Se debe acordar por ambiente:
 - `launchUrl` del cliente;
 - una o más `redirectUris` completas;
 - tipo confidencial o público;
+- `backchannelLogoutUri` del backend cliente, si implementará Single Logout;
 - issuer esperado, igual a `IDENTITY_HUB_PUBLIC_URL`;
 - URL del JWKS: `/.well-known/jwks.json` sobre el origen público del Hub.
 
@@ -76,7 +77,9 @@ Respuesta exitosa:
 }
 ```
 
-El backend guarda los tokens y crea su propia sesión. El refresh se rota enviando `grant_type=refresh_token&refresh_token=<valor-actual>`; cada respuesta exitosa reemplaza el valor anterior. La actualización debe ser atómica y el cliente debe evitar refresh concurrentes para una misma sesión.
+El backend guarda los tokens y crea su propia sesión. Debe obtener el claim `sid` del access token y conservarlo en esa sesión local. El refresh se rota enviando `grant_type=refresh_token&refresh_token=<valor-actual>`; cada respuesta exitosa reemplaza el valor anterior. La actualización debe ser atómica y el cliente debe evitar refresh concurrentes para una misma sesión.
+
+`refresh_token_expires_in` expresa la vida restante que permite la sesión SIAU. No representa necesariamente 10 horas nuevas después de cada refresh y nunca supera la expiración absoluta de esa sesión.
 
 Los errores de `/oauth/token` usan `error` y `error_description`. `invalid_grant` es definitivo para el code o refresh presentado: se descarta y se inicia una autorización nueva. Un `500` o `503` es un fallo transitorio de infraestructura y no demuestra por sí solo que la credencial sea inválida.
 
@@ -89,6 +92,7 @@ Antes de aceptar el token, el backend cliente debe:
 3. Comparar `iss` exactamente con el issuer configurado para ese ambiente.
 4. Comparar `aud` con su propio `clientId`.
 5. Validar `exp` con el reloj actual.
+6. Obtener un `sid` válido y guardarlo con la sesión local.
 
 No basta con decodificar el JWT. El claim `clientId` tampoco sustituye la validación de `aud`.
 
@@ -121,7 +125,35 @@ La consulta individual por `externalKey` incluye `relationKey`; el listado no lo
 
 ## 7. Logout del cliente
 
-El cliente siempre debe eliminar su sesión y sus tokens locales. El logout central se realiza en Identity Hub y no recibe callbacks ni notifica a otros clientes. Cerrar la sesión local no cierra SSO; cerrar SSO no borra la sesión local.
+El frontend llama únicamente a su propio backend. El backend obtiene el `sid` guardado en la sesión local e inicia el cierre central:
+
+```http
+POST /internal/sessions/logout
+Authorization: Basic <base64(clientId:clientSecret)>
+Content-Type: application/json
+
+{ "sid": "<uuid>" }
+```
+
+SIAU autentica la aplicación, comprueba que participó en ese `sid`, cierra únicamente esa sesión central y notifica a todos sus participantes. Para recibir la notificación, el cliente debe registrar un `backchannelLogoutUri` que acepte:
+
+```text
+Content-Type: application/x-www-form-urlencoded
+
+logout_token=<JWT>
+```
+
+El endpoint debe validar:
+
+- algoritmo RS256 y firma con la clave publicada en JWKS;
+- header `typ=logout+jwt`;
+- `iss` esperado, `aud` igual a su `clientId` y `exp` vigente;
+- `sid`;
+- el evento `http://schemas.openid.net/event/backchannel-logout` dentro de `events`.
+
+Después elimina todas sus sesiones locales asociadas al `sid`. El endpoint back-channel debe ser idempotente: si ya no existe ninguna, responde éxito igualmente.
+
+El cliente que inició el logout elimina también su propia sesión, cookie y tokens locales. No debe depender exclusivamente de recibir después su propia notificación back-channel y decide por sí mismo el redirect del navegador.
 
 ## Checklist
 
@@ -131,5 +163,7 @@ El cliente siempre debe eliminar su sesión y sus tokens locales. El logout cent
 - Canjear y refrescar con formulario URL-encoded.
 - Reemplazar el refresh token después de cada rotación.
 - Validar JWKS, RS256, `kid`, `iss`, `aud` y `exp`.
+- Guardar el `sid` en la sesión local e implementar el logout backend-to-backend.
+- Exponer un `backchannelLogoutUri` idempotente y validar el Logout Token.
 - Usar `externalKey`, no `login`, para el vínculo estable del usuario.
 - Mantener sesión, roles y logout propios.

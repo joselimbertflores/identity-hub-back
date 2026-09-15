@@ -9,12 +9,12 @@ No es un proveedor OpenID Connect completo: no emite `id_token`, no publica disc
 Identity Hub:
 
 - administra usuarios, credenciales y administradores;
-- registra aplicaciones cliente y sus callbacks;
+- registra aplicaciones cliente, sus callbacks y su `backchannelLogoutUri` opcional;
 - asigna usuarios a aplicaciones;
 - ejecuta Authorization Code con PKCE S256;
 - emite access tokens JWT RS256 y refresh tokens rotativos;
-- publica el JWKS para validar access tokens;
-- mantiene la sesión central y el estado temporal de OAuth;
+- publica el JWKS para validar access tokens y Logout Tokens;
+- mantiene la sesión SSO central, el estado temporal de OAuth y coordina Single Logout;
 - gestiona activación inicial, cambio y recuperación de contraseña.
 
 Cada aplicación cliente:
@@ -56,6 +56,7 @@ Un administrador registra una aplicación desde Identity Hub con:
 - nombre y `launchUrl`;
 - una o más `redirectUris` exactas;
 - tipo confidencial o público;
+- `backchannelLogoutUri` opcional para recibir notificaciones de Single Logout;
 - estado activo o inactivo.
 
 Las aplicaciones son confidenciales por defecto. Al crear o regenerar una aplicación, el secreto se devuelve una sola vez y se guarda en PostgreSQL únicamente como hash. El administrador debe transferirlo al backend cliente mediante un canal seguro.
