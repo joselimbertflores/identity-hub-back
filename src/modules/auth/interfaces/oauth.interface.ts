@@ -2,6 +2,7 @@ import type { AuthorizeParamsDto } from '../dtos';
 
 export interface AuthorizationCodePayload {
   userId: string;
+  sid: string;
   credentialVersion: number;
   clientId: string;
   redirectUri: string;

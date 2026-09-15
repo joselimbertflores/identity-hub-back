@@ -1,17 +1,17 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
 import { AuthException, AuthErrorCode } from '../exceptions/auth.exception';
-import { AuthSessionPayload, AuthUser } from '../interfaces';
+import { AuthSessionPayload, AuthUser, RevokedSessionContext } from '../interfaces';
 import { User } from 'src/modules/users/entities';
 import { UsersService } from 'src/modules/users/services';
 import { MailService } from 'src/modules/mail';
 import { TokenService } from './token.service';
 import { SessionService } from './session.service';
-import { LoginDto } from '../dtos';
+import { ChangePasswordDto, LoginDto } from '../dtos';
 import { buildPasswordChangedEmail } from '../mail/password-email.templates';
 
 @Injectable()
@@ -34,9 +34,11 @@ export class AuthService {
 
   async completeAuthenticatedPasswordChange(
     userId: string,
-    currentPassword: string,
-    newPassword: string,
+    { currentPassword, newPassword, passwordConfirmation }: ChangePasswordDto,
   ): Promise<{ sessionId: string }> {
+    if (newPassword !== passwordConfirmation) {
+      throw new BadRequestException('Password confirmation does not match.');
+    }
     const user = await this.usersService.applyAuthenticatedPasswordChange(userId, currentPassword, newPassword);
     await this.cleanupInvalidatedAuthStateForUserBestEffort(userId);
     const sessionId = await this.createAuthSession(user);
@@ -115,8 +117,7 @@ export class AuthService {
       .where('user.id = :id', { id: session.userId })
       .getOne();
 
-    // Missing versions (legacy sessions) and stale versions must require a fresh login,
-    // including when Redis cleanup fails or a login races with a credential change.
+    // PostgreSQL remains authoritative even if Redis cleanup fails.
     if (
       !user?.isActive ||
       !Number.isInteger(session.credentialVersion) ||
@@ -132,31 +133,13 @@ export class AuthService {
     return { session, user };
   }
 
-  async logout(sessionId: string | undefined) {
-    if (!sessionId) {
-      return {
-        ok: true,
-        message: 'Session is already logged out',
-      };
-    }
+  async logout(sessionId: string | undefined): Promise<RevokedSessionContext | null> {
+    if (!sessionId) return null;
 
-    const authenticated = await this.loadAuthenticatedSession(sessionId);
+    const session = await this.sessionService.get(sessionId);
+    if (!session) return null;
 
-    if (!authenticated) {
-      return {
-        ok: true,
-        message: 'Session is already logged out',
-      };
-    }
-
-    // Logout is global for refresh tokens but removes only the presented Identity Hub session.
-    await this.tokenService.revokeAllRefreshTokensForUser(authenticated.user.id);
-    await this.sessionService.remove(sessionId, authenticated.user.id);
-
-    return {
-      ok: true,
-      message: 'Logout successful',
-    };
+    return this.sessionService.remove(sessionId, session.userId);
   }
 
   async cleanupInvalidatedAuthStateForUserBestEffort(userId: string): Promise<void> {
@@ -171,18 +154,5 @@ export class AuthService {
         this.logger.warn(`${index === 0 ? 'Refresh token' : 'SSO session'} cleanup failed after credential change`);
       }
     }
-  }
-
-  async findUserEligibleForOAuthCredentials(userId: string, applicationId: number): Promise<User | null> {
-    return this.userRepository
-      .createQueryBuilder('user')
-      .addSelect('user.credentialVersion')
-      .innerJoin('user.applications', 'application')
-      .where('user.id = :userId', { userId })
-      .andWhere('user.isActive = true')
-      .andWhere('user.mustChangePassword = false')
-      .andWhere('application.id = :applicationId', { applicationId })
-      .andWhere('application.isActive = true')
-      .getOne();
   }
 }

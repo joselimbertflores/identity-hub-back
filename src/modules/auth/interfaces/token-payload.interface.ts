@@ -1,5 +1,6 @@
 export class AccessTokenPayload {
   sub: string;
+  sid: string;
   externalKey: string;
   name: string;
   clientId: string;
@@ -8,6 +9,7 @@ export class AccessTokenPayload {
 
 export class RefreshTokenPayload {
   userId: string;
+  sid: string;
   clientId: string;
   credentialVersion: number;
   scope?: string;
@@ -22,7 +24,7 @@ export interface IssuedTokenPair {
 }
 
 export interface PreparedTokenPair {
-  tokens: IssuedTokenPair;
+  tokens: Omit<IssuedTokenPair, 'refreshTokenExpiresIn'>;
   refreshTokenPayload: RefreshTokenPayload;
 }
 

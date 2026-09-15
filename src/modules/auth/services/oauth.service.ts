@@ -1,24 +1,21 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 
-import { Repository } from 'typeorm';
-import { compare } from 'bcrypt';
+import { In, Repository } from 'typeorm';
 import Redis from 'ioredis';
 
-import { LoginParamsDto, TokenRequestDto, AuthorizeParamsDto, GrantType } from '../dtos';
+import { LoginParamsDto, AuthorizeParamsDto, LogoutParamsDto } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
-import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Application } from 'src/modules/access/entities';
-import { AuthorizationCodePayload, PendingAuthorizationRequest, TokenClientAuthentication } from '../interfaces';
+import { PendingAuthorizationRequest } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
-import { PkceService } from './pkce.service';
+import { UsersService } from 'src/modules/users/services';
 import {
-  AUTH_CODE_KEY_PREFIX,
-  AUTH_CODE_TTL_SECONDS,
+  BACKCHANNEL_LOGOUT_TIMEOUT_MS,
   IDENTITY_HUB_UI_PATHS,
   PENDING_AUTH_REQUEST_KEY_PREFIX,
   PENDING_AUTH_REQUEST_TTL_SECONDS,
@@ -26,13 +23,15 @@ import {
 
 @Injectable()
 export class OAuthService {
+  private readonly logger = new Logger(OAuthService.name);
+
   constructor(
     @InjectRepository(Application) private readonly appRepository: Repository<Application>,
     @InjectRedis() private readonly redis: Redis,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly tokenService: TokenService,
     private readonly authService: AuthService,
-    private readonly pkceService: PkceService,
+    private readonly usersService: UsersService,
   ) {}
 
   async handleAuthorizeRequest(params: AuthorizeParamsDto, sessionId: string | undefined): Promise<string> {
@@ -65,7 +64,7 @@ export class OAuthService {
       return this.buildPasswordChangeRedirectUrl(authRequestId);
     }
 
-    const user = await this.authService.findUserEligibleForOAuthCredentials(sessionUser.id, app.id);
+    const user = await this.usersService.findUserEligibleForOAuthCredentials(sessionUser.id, app.id);
     if (!user || user.credentialVersion !== session.credentialVersion) {
       return this.buildClientRedirectUrl(params.redirectUri, {
         error: 'access_denied',
@@ -73,23 +72,31 @@ export class OAuthService {
       });
     }
 
-    const code = await this.createAuthorizationCode(user.id, user.credentialVersion, params);
+    const code = await this.tokenService.createAuthorizationCode(session, params);
 
     return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
   }
 
-  async handleTokenRequest(
-    dto: TokenRequestDto,
-    authentication: TokenClientAuthentication = { method: 'none', clientId: dto.clientId },
-  ) {
-    if (authentication.clientId !== dto.clientId) {
-      throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
+  async handleLogoutRequest(params: LogoutParamsDto, sessionId: string | undefined): Promise<string> {
+    const app = await this.appRepository.findOne({ where: { clientId: params.clientId, isActive: true } });
+    if (!app || app.postLogoutRedirectUri !== params.postLogoutRedirectUri) {
+      throw new BadRequestException('Invalid logout request');
     }
 
-    const app = await this.loadValidApplication(authentication);
-    return dto.grantType === GrantType.AUTHORIZATION_CODE
-      ? this.handleAuthorizationCodeGrant(dto, app)
-      : this.handleRefreshTokenGrant(dto, app);
+    await this.logout(sessionId);
+    return app.postLogoutRedirectUri;
+  }
+
+  async logout(sessionId: string | undefined) {
+    const revokedSession = await this.authService.logout(sessionId);
+    if (revokedSession) {
+      await this.notifyBackchannelLogout(revokedSession.sid, revokedSession.clientIds);
+    }
+
+    return {
+      ok: true,
+      message: revokedSession ? 'Logout successful' : 'Session is already logged out',
+    };
   }
 
   async resolvePostLoginRedirect(
@@ -137,134 +144,38 @@ export class OAuthService {
     });
   }
 
-  private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
-    const key = `${AUTH_CODE_KEY_PREFIX}${dto.code}`;
+  private async notifyBackchannelLogout(sid: string, clientIds: string[]): Promise<void> {
+    if (clientIds.length === 0) return;
 
-    const raw = await this.redis.get(key);
-
-    if (!raw) throw new UnauthorizedException('Invalid or expired code.');
-
-    const context = JSON.parse(raw) as AuthorizationCodePayload;
-
-    if (context.clientId !== dto.clientId || context.redirectUri !== dto.redirectUri) {
-      throw new UnauthorizedException('Invalid client.');
+    let applications: Application[];
+    try {
+      applications = await this.appRepository.find({ where: { clientId: In([...new Set(clientIds)]) } });
+    } catch {
+      this.logger.warn('Could not load applications for back-channel logout');
+      return;
     }
 
-    // PKCE is mandatory for authorization_code and only S256 challenges are accepted.
-    this.pkceService.verifyCodeVerifier(dto.codeVerifier, context.codeChallenge, context.codeChallengeMethod);
-
-    const user = await this.authService.findUserEligibleForOAuthCredentials(context.userId, app.id);
-    if (!user || !Number.isInteger(context.credentialVersion) || user.credentialVersion !== context.credentialVersion) {
-      throw new UnauthorizedException('User no longer has access to this application.');
-    }
-
-    const preparedTokenPair = await this.tokenService.prepareTokenPair(
-      {
-        sub: user.id,
-        externalKey: user.externalKey,
-        name: user.fullName,
-        clientId: context.clientId,
-      },
-      user.credentialVersion,
-    );
-
-    const completed = await this.tokenService.completeAuthorizationCodeGrant(dto.code!, raw, preparedTokenPair);
-    if (!completed) {
-      throw new UnauthorizedException('Invalid or expired code.');
-    }
-
-    return preparedTokenPair.tokens;
+    await Promise.all(applications.map((app) => this.sendBackchannelLogout(app, sid)));
   }
 
-  private async handleRefreshTokenGrant(dto: TokenRequestDto, app: Application) {
-    if (!dto.refreshToken) {
-      throw new UnauthorizedException('refresh_token is required.');
-    }
+  private async sendBackchannelLogout(app: Application, sid: string): Promise<void> {
+    if (!app.backchannelLogoutUri) return;
 
-    const storedRefreshToken = await this.tokenService.readRefreshToken(dto.refreshToken);
-    if (!storedRefreshToken) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
+    try {
+      const logoutToken = await this.tokenService.createLogoutToken(sid, app.clientId);
+      const response = await fetch(app.backchannelLogoutUri, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ logout_token: logoutToken }),
+        signal: AbortSignal.timeout(BACKCHANNEL_LOGOUT_TIMEOUT_MS),
+      });
 
-    const data = storedRefreshToken.payload;
-
-    if (data.clientId !== app.clientId) {
-      throw new UnauthorizedException('invalid_client');
-    }
-
-    const user = await this.authService.findUserEligibleForOAuthCredentials(data.userId, app.id);
-    if (!user) {
-      throw new UnauthorizedException('User no longer has access to this application.');
-    }
-
-    if (!Number.isInteger(data.credentialVersion) || data.credentialVersion !== user.credentialVersion) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
-
-    const preparedTokenPair = await this.tokenService.prepareTokenPair(
-      {
-        sub: user.id,
-        name: user.fullName,
-        externalKey: user.externalKey,
-        clientId: data.clientId,
-      },
-      user.credentialVersion,
-    );
-
-    const rotated = await this.tokenService.rotateRefreshToken(
-      dto.refreshToken,
-      storedRefreshToken.raw,
-      preparedTokenPair,
-    );
-    if (!rotated) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
-
-    return preparedTokenPair.tokens;
-  }
-
-  private async createAuthorizationCode(
-    userId: string,
-    credentialVersion: number,
-    { clientId, redirectUri, codeChallenge, codeChallengeMethod }: AuthorizeParamsDto,
-  ) {
-    const code = crypto.randomUUID();
-    const key = `${AUTH_CODE_KEY_PREFIX}${code}`;
-    const payload: AuthorizationCodePayload = {
-      userId,
-      credentialVersion,
-      clientId,
-      redirectUri,
-      codeChallenge,
-      codeChallengeMethod,
-      createdAt: Date.now(),
-    };
-    await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
-    return code;
-  }
-
-  private async loadValidApplication(authentication: TokenClientAuthentication): Promise<Application> {
-    const app = await this.appRepository
-      .createQueryBuilder('app')
-      .addSelect('app.clientSecretHash')
-      .where('app.clientId = :clientId', { clientId: authentication.clientId })
-      .andWhere('app.isActive = true')
-      .getOne();
-
-    if (!app) throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
-
-    if (app.isConfidential) {
-      if (authentication.method !== 'basic') {
-        throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
+      if (!response.ok) {
+        this.logger.warn(`Back-channel logout failed for client ${app.clientId} with status ${response.status}`);
       }
-      const isSecretValid = await compare(authentication.clientSecret, app.clientSecretHash);
-      if (!isSecretValid) {
-        throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
-      }
-    } else if (authentication.method !== 'none') {
-      throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
+    } catch {
+      this.logger.warn(`Back-channel logout failed for client ${app.clientId}`);
     }
-    return app;
   }
 
   private async createPendingAuthRequest(params: AuthorizeParamsDto, sessionId?: string): Promise<string> {
@@ -309,11 +220,11 @@ export class OAuthService {
   }
 
   private parsePendingAuthRequest(data: string): PendingAuthorizationRequest {
-    const parsed = JSON.parse(data) as PendingAuthorizationRequest | AuthorizeParamsDto;
-
-    // Accept pending entries created immediately before this deployment, then store them in the current shape on bind.
-    if ('params' in parsed) return parsed;
-    return { params: parsed };
+    const parsed = JSON.parse(data) as PendingAuthorizationRequest;
+    if (!parsed || typeof parsed !== 'object' || !parsed.params) {
+      throw new Error('Invalid pending authorization request');
+    }
+    return parsed;
   }
 
   private buildPasswordChangeRedirectUrl(authRequestId?: string): string {

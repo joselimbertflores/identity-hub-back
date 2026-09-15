@@ -8,7 +8,8 @@ export const USER_REFRESH_TOKENS_KEY_PREFIX = 'user_refresh_tokens:';
 export const AUTH_CODE_TTL_SECONDS = 5 * 60;
 export const PENDING_AUTH_REQUEST_TTL_SECONDS = 5 * 60;
 export const ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
-export const REFRESH_TOKEN_TTL_SECONDS = 10 * 60 * 60;
+export const LOGOUT_TOKEN_TTL_SECONDS = 2 * 60;
+export const BACKCHANNEL_LOGOUT_TIMEOUT_MS = 5_000;
 
 export const IDENTITY_HUB_UI_PATHS = {
   LOGIN: '/login',

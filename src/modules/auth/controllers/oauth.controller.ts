@@ -17,15 +17,19 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { Response } from 'express';
 
-import { AuthorizeParamsDto, GrantType, LoginDto, LoginParamsDto, TokenRequestDto } from '../dtos';
+import { AuthorizeParamsDto, GrantType, LoginDto, LoginParamsDto, LogoutParamsDto, TokenRequestDto } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Cookies, Public } from '../decorators';
-import { AuthService, OAuthService } from '../services';
+import { AuthService, OAuthService, TokenService } from '../services';
 import { OAuthTokenResponse, TokenClientAuthentication } from '../interfaces';
 import { EnvironmentVariables } from 'src/config';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
-import { buildSessionCookieOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
+import {
+  buildSessionCookieClearOptions,
+  buildSessionCookieOptions,
+  SESSION_COOKIE_NAME,
+} from '../constants/session.constants';
 
 const TOKEN_FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded';
 const SUPPORTED_GRANT_TYPES = new Set<string>(Object.values(GrantType));
@@ -40,6 +44,7 @@ export class OAuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly oauthService: OAuthService,
+    private readonly tokenService: TokenService,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
   ) {}
 
@@ -52,6 +57,20 @@ export class OAuthController {
   ) {
     const url = await this.oauthService.handleAuthorizeRequest(query, sessionId);
     return res.redirect(url);
+  }
+
+  @Public()
+  @Get('logout')
+  async logout(
+    @Query() query: LogoutParamsDto,
+    @Cookies(SESSION_COOKIE_NAME) sessionId: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const redirectUrl = await this.oauthService.handleLogoutRequest(query, sessionId);
+    const secure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
+    const sameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
+    res.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(secure, sameSite));
+    return res.redirect(redirectUrl);
   }
 
   @Public()
@@ -108,7 +127,7 @@ export class OAuthController {
         basicCredentials,
         Object.hasOwn(form, 'client_id'),
       );
-      const tokenPair = await this.oauthService.handleTokenRequest(request, authentication);
+      const tokenPair = await this.tokenService.handleTokenRequest(request, authentication);
 
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Pragma', 'no-cache');

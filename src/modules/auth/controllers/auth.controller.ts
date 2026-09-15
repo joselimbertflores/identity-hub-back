@@ -1,16 +1,4 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Patch,
-  Post,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
@@ -66,7 +54,7 @@ export class AuthController {
   ) {
     const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
     const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
-    const result = await this.authService.logout(sessionId);
+    const result = await this.oauthService.logout(sessionId);
     response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure, cookieSameSite));
     return result;
   }
@@ -80,15 +68,7 @@ export class AuthController {
     @Cookies(SESSION_COOKIE_NAME) sessionId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    if (body.newPassword !== body.passwordConfirmation) {
-      throw new BadRequestException('Password confirmation does not match.');
-    }
-
-    const { sessionId: newSessionId } = await this.authService.completeAuthenticatedPasswordChange(
-      userId,
-      body.currentPassword,
-      body.newPassword,
-    );
+    const { sessionId: newSessionId } = await this.authService.completeAuthenticatedPasswordChange(userId, body);
     const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
     const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
     response.cookie(SESSION_COOKIE_NAME, newSessionId, buildSessionCookieOptions(cookieSecure, cookieSameSite));

@@ -56,3 +56,14 @@ export class LoginParamsDto {
   @Expose({ name: 'auth_request_id' })
   authRequestId?: string;
 }
+
+export class LogoutParamsDto {
+  @IsString()
+  @IsNotEmpty()
+  @Expose({ name: 'client_id' })
+  clientId: string;
+
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  @Expose({ name: 'post_logout_redirect_uri' })
+  postLogoutRedirectUri: string;
+}
