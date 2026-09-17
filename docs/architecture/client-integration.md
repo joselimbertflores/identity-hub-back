@@ -4,7 +4,7 @@ El backend cliente debe controlar OAuth y mantener la sesión local. El frontend
 
 ## 1. Registrar la aplicación
 
-Un administrador crea la aplicación en Identity Hub mediante el panel administrativo. La implementación expone esta operación en `POST /api/applications` y exige sesión central con rol `ADMIN`.
+Un administrador crea la aplicación en SIAU mediante el panel administrativo. La implementación expone esta operación en `POST /api/applications` y exige sesión central con rol `ADMIN`.
 
 Se debe acordar por ambiente:
 
@@ -14,13 +14,13 @@ Se debe acordar por ambiente:
 - tipo confidencial o público;
 - `backchannelLogoutUri` del backend cliente, si implementará Single Logout;
 - issuer esperado, igual a `IDENTITY_HUB_PUBLIC_URL`;
-- URL del JWKS: `/.well-known/jwks.json` sobre el origen público del Hub.
+- URL del JWKS: `/.well-known/jwks.json` sobre el origen público de SIAU.
 
-Identity Hub normaliza `clientId` a minúsculas al crearlo y luego no permite editarlo. El backend cliente debe conservar el valor devuelto por el Hub.
+SIAU normaliza `clientId` a minúsculas al crearlo y luego no permite editarlo. El backend cliente debe conservar el valor devuelto por SIAU.
 
 La comparación de `redirect_uri` es exacta. No hay comodines, prefijos ni normalización. HTTP funciona si la URI registrada lo usa, pero HTTPS es la opción recomendada.
 
-Para una aplicación confidencial, el administrador debe guardar el `clientSecret` mostrado al crearla. Identity Hub solo persiste su hash. Regenerarlo invalida inmediatamente el secreto anterior para nuevas llamadas autenticadas.
+Para una aplicación confidencial, el administrador debe guardar el `clientSecret` mostrado al crearla. SIAU solo persiste su hash. Regenerarlo invalida inmediatamente el secreto anterior para nuevas llamadas autenticadas.
 
 El administrador también asigna usuarios a la aplicación. Sin una asignación activa el usuario no puede autorizar, canjear o refrescar tokens para ese cliente.
 
@@ -32,13 +32,13 @@ Por cada intento, el backend cliente debe:
 2. Generar un `code_verifier` PKCE aleatorio de 43 a 128 caracteres no reservados: letras, dígitos, `.`, `_`, `~` o `-`.
 3. Calcular `code_challenge = base64url(sha256(code_verifier))`, sin padding.
 4. Guardar `state` y `code_verifier` del lado servidor, vinculados al navegador.
-5. Redirigir a Identity Hub.
+5. Redirigir a SIAU.
 
 ```http
 GET /oauth/authorize?response_type=code&client_id=client-app&redirect_uri=https%3A%2F%2Fclient.example%2Fauth%2Fcallback&state=<state>&code_challenge=<challenge>&code_challenge_method=S256
 ```
 
-No se debe enviar `scope`. Identity Hub pedirá credenciales solo si no existe una sesión SSO reutilizable.
+No se debe enviar `scope`. SIAU pedirá credenciales solo si no existe una sesión SSO reutilizable.
 
 ## 3. Procesar el callback
 
@@ -96,11 +96,11 @@ Antes de aceptar el token, el backend cliente debe:
 
 No basta con decodificar el JWT. El claim `clientId` tampoco sustituye la validación de `aud`.
 
-Para vincular un usuario local se debe guardar `externalKey`: identifica de forma estable la cuenta de Identity Hub y también aparece en el directorio interno. `relationKey` es un vínculo opcional con la persona o funcionario institucional y puede usarse para reconciliación con ese sistema de origen. `login` sirve para autenticarse, no como clave de integración. `name` es solo un dato visible y puede cambiar; email y roles no están incluidos en el token. `sub` es el UUID interno de la instancia del Hub y no debe sustituir a `externalKey` en sincronizaciones entre sistemas.
+Para vincular un usuario local se debe guardar `externalKey`: identifica de forma estable la cuenta de SIAU y también aparece en el directorio interno. `relationKey`, cuando existe, vincula la cuenta con el funcionario de RRHH y puede usarse para reconciliación. `login` sirve para autenticarse, no como clave de integración. `name` es solo un dato visible y puede cambiar; email y roles no están incluidos en el token. `sub` es el UUID interno de la instancia de SIAU y no debe sustituir a `externalKey` en sincronizaciones entre sistemas.
 
 ## 6. Directorio interno opcional
 
-Un backend cliente puede consultar los usuarios activos que Identity Hub le ha asignado:
+Un backend cliente puede consultar los usuarios activos que SIAU le ha asignado:
 
 | Método | Ruta                                      | Resultado                                          |
 | ------ | ----------------------------------------- | -------------------------------------------------- |
@@ -117,7 +117,7 @@ La consulta individual expone solo:
   "fullName": "Client User",
   "email": "user@example.org",
   "login": "client.user",
-  "relationKey": "institutional-person-key"
+  "relationKey": "53535-1K"
 }
 ```
 

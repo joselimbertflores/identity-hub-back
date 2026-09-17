@@ -1,4 +1,6 @@
-# Documentación de Identity Hub
+# Documentación de SIAU
+
+SIAU (Sistema de Identidad y Acceso Unificado) centraliza la identidad y el acceso de las aplicaciones cliente.
 
 Lectura recomendada:
 
