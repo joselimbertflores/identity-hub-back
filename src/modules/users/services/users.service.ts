@@ -66,6 +66,19 @@ export class UsersService {
     };
   }
 
+  async ensureRelationKeyAvailable(relationKey: string, manager: EntityManager): Promise<void> {
+    // Serialize administrative creations for the same employee, including when no user exists yet.
+    await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `administrative-user:${relationKey}`,
+    ]);
+    if (await manager.getRepository(User).existsBy({ relationKey })) {
+      throw new ConflictException({
+        code: 'USER_RELATION_KEY_ALREADY_EXISTS',
+        message: 'A user already exists for this employee.',
+      });
+    }
+  }
+
   async create(dto: CreateUserDto, passwordHash: string, manager?: EntityManager): Promise<User> {
     const repository = manager ? manager.getRepository(User) : this.userRepository;
     const email = this.normalizeEmail(dto.email);

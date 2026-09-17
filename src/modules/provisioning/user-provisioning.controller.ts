@@ -1,17 +1,26 @@
-import { Body, Controller, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 
 import { RequiredRole } from '../auth/decorators';
 import { UserRole } from '../users/entities';
-import { CreateUserWithAccessDto, UpdateUserWithAccessDto } from './dtos';
+import { CreateAdministrativeUserDto, EmployeeSearchQueryDto, UpdateUserWithAccessDto } from './dtos';
 import { UserProvisioningService } from './services';
+import { RrhhEmployeesService } from './services/rrhh-employees.service';
 
 @RequiredRole(UserRole.ADMIN)
 @Controller('users')
 export class UserProvisioningController {
-  constructor(private readonly userProvisioningService: UserProvisioningService) {}
+  constructor(
+    private readonly userProvisioningService: UserProvisioningService,
+    private readonly rrhhEmployeesService: RrhhEmployeesService,
+  ) {}
+
+  @Get('employees')
+  searchEmployees(@Query() query: EmployeeSearchQueryDto) {
+    return this.rrhhEmployeesService.search(query);
+  }
 
   @Post('access')
-  create(@Body() body: CreateUserWithAccessDto) {
+  create(@Body() body: CreateAdministrativeUserDto) {
     return this.userProvisioningService.provisionUserWithApplications(body);
   }
 

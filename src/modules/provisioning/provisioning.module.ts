@@ -5,10 +5,11 @@ import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { UserProvisioningService } from './services';
 import { UserProvisioningController } from './user-provisioning.controller';
+import { RrhhEmployeesService } from './services/rrhh-employees.service';
 
 @Module({
   controllers: [UserProvisioningController],
-  providers: [UserProvisioningService],
+  providers: [UserProvisioningService, RrhhEmployeesService],
   imports: [UsersModule, AccessModule, AuthModule],
 })
 export class ProvisioningModule {}

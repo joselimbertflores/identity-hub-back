@@ -15,6 +15,8 @@ export interface EnvironmentVariables {
   DATABASE_PASSWORD: string;
   DATABASE_SYNCHRONIZE: boolean;
   REDIS_URL: string;
+  RRHH_INTERNAL_URL?: string;
+  RRHH_ACCESS_TOKEN?: string;
   JWT_PRIVATE_KEY_PATH: string;
   JWT_PUBLIC_KEY_PATH: string;
   PASSWORD_INITIAL_SETUP_TTL_SECONDS: number;
@@ -52,6 +54,8 @@ export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables>
   REDIS_URL: Joi.string()
     .uri({ scheme: ['redis', 'rediss'], allowRelative: false })
     .required(),
+  RRHH_INTERNAL_URL: httpUrlSchema.optional(),
+  RRHH_ACCESS_TOKEN: Joi.string().trim().min(1).optional(),
   JWT_PRIVATE_KEY_PATH: Joi.string().min(1).required(),
   JWT_PUBLIC_KEY_PATH: Joi.string().min(1).required(),
   PASSWORD_INITIAL_SETUP_TTL_SECONDS: Joi.number()
@@ -77,4 +81,6 @@ export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables>
   BOOTSTRAP_ADMIN_LOGIN: Joi.string().trim().min(1).optional(),
   BOOTSTRAP_ADMIN_PASSWORD: Joi.string().min(1).optional(),
   BOOTSTRAP_ADMIN_FULL_NAME: Joi.string().trim().min(1).optional(),
-}).and('SMTP_USERNAME', 'SMTP_PASSWORD');
+})
+  .and('SMTP_USERNAME', 'SMTP_PASSWORD')
+  .and('RRHH_INTERNAL_URL', 'RRHH_ACCESS_TOKEN');
