@@ -1,124 +1,93 @@
 # Visión general
 
-SIAU es el punto central de identidad para aplicaciones cliente. Autentica usuarios, mantiene una sesión SSO en su propio dominio y emite credenciales OAuth para los clientes autorizados.
+SIAU centraliza identidad y acceso para aplicaciones cliente. Autentica usuarios, mantiene una sesión SSO en su propio dominio y emite credenciales OAuth a clientes autorizados.
 
 No es un proveedor OpenID Connect completo: no emite `id_token`, no publica discovery y no implementa scopes ni `userinfo`.
 
-## Responsabilidades
+## Límites y responsabilidades
 
 SIAU:
 
-- administra usuarios, credenciales y administradores;
-- registra aplicaciones cliente, sus callbacks y su `backchannelLogoutUri` opcional;
-- asigna usuarios a aplicaciones;
+- administra usuarios, credenciales, aplicaciones y asignaciones de acceso;
 - ejecuta Authorization Code con PKCE S256;
 - emite access tokens JWT RS256 y refresh tokens rotativos;
 - publica el JWKS para validar access tokens y Logout Tokens;
-- mantiene la sesión SSO central, el estado temporal de OAuth y coordina Single Logout;
-- gestiona activación inicial, cambio y recuperación de contraseña.
+- mantiene la sesión SSO y coordina Single Logout;
+- gestiona activación inicial, cambio y recuperación de contraseña;
+- integra fuentes institucionales de identidad detrás de su propio backend.
 
-Cada aplicación cliente:
+Cada aplicación cliente mantiene su sesión, usuarios locales cuando corresponda, roles, permisos y reglas de negocio. La sesión central no reemplaza la sesión local. La guía del integrador está en [Integración de una aplicación cliente](client-integration.md).
 
-- mantiene su propia sesión y autorización local;
-- protege su secreto y sus tokens en el backend;
-- valida los tokens recibidos;
-- conserva un usuario local si necesita datos o permisos propios.
+## Componentes
 
-SIAU no conoce los roles internos ni las reglas de negocio de los clientes. La sesión central tampoco reemplaza la sesión local de un cliente.
+| Componente | Responsabilidad |
+| --- | --- |
+| UI de SIAU | Login, portal, contraseñas y administración. |
+| API de SIAU | Sesiones, OAuth, usuarios, aplicaciones, asignaciones y JWKS. |
+| PostgreSQL | Estado persistente de usuarios, aplicaciones, asignaciones y acciones de contraseña. |
+| Redis | Sesiones centrales, estado OAuth temporal, codes, refresh tokens e índices de revocación. |
+| Backend cliente | Estado PKCE, callback, tokens y sesión local. |
 
-## Componentes y estado
+Redis forma parte del estado de seguridad y no es solo caché: perderlo cierra sesiones e invalida credenciales temporales. El consumo de authorization codes, la rotación de refresh tokens y las comprobaciones ligadas a la sesión se realizan de forma atómica.
 
-| Componente       | Responsabilidad                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------- |
-| SIAU UI          | Login, portal, cambio y recuperación de contraseña, y administración.                                   |
-| SIAU API         | Sesiones, OAuth, usuarios, aplicaciones, asignaciones y JWKS.                                           |
-| PostgreSQL       | Usuarios, aplicaciones, asignaciones y acciones de contraseña pendientes.                               |
-| Redis            | Sesiones SSO, solicitudes de autorización, authorization codes, refresh tokens e índices de revocación. |
-| Backend cliente  | `state`, PKCE, callback, tokens y sesión local.                                                         |
+## Identidad y aprovisionamiento
 
-Los usuarios solo pueden obtener o refrescar credenciales para aplicaciones activas a las que estén asignados. La asignación también limita el directorio interno que puede consultar cada sistema consumidor.
+Los identificadores tienen responsabilidades diferentes:
 
-## Identidad del usuario
+- `externalKey` es la identidad estable que persisten las aplicaciones cliente;
+- `relationKey` vincula internamente la cuenta con una fuente institucional de personas y puede faltar en cuentas históricas;
+- `login` sirve para autenticarse y puede cambiar;
+- `sub` identifica al usuario dentro de esta instancia de SIAU.
 
-Los tres identificadores tienen propósitos distintos:
+Las altas administrativas verifican la identidad contra la fuente institucional desde el backend. La interfaz de SIAU no consulta esa fuente directamente ni considera autoritativos los resultados que devuelve una búsqueda previa. Los procesos controlados de importación son independientes de las altas nuevas.
 
-- `externalKey` identifica de forma estable la cuenta de SIAU y es la clave que deben persistir las aplicaciones cliente;
-- `relationKey` vincula la cuenta con el funcionario de RRHH: es obligatoria en nuevas creaciones administrativas, aunque puede faltar en cuentas históricas o importadas;
-- `login` sirve para autenticarse y puede cambiar, por lo que no debe usarse como clave de integración.
+Una aplicación solo puede obtener o refrescar credenciales para usuarios activos que tenga asignados. El directorio server-to-server `/internal/users/assignable` aplica la misma asignación y permite a un cliente confidencial preparar vinculaciones por `externalKey`; no expone roles internos de SIAU ni sustituye la autorización local.
 
-`mustChangePassword` describe solo una restricción actual: el usuario debe cambiar su contraseña antes de continuar normalmente. No registra si la cuenta fue configurada por primera vez ni conserva historial.
+## Aplicaciones cliente
 
-## RRHH y creación administrativa de usuarios
+El registro de una aplicación define:
 
-RRHH es la fuente autoritativa de la identidad institucional: `relationKey`, `fullName`, cargo, unidad o dependencia y vigencia laboral. `relationKey` es el identificador de relación definido por RRHH a partir del CI; si este tiene complemento, también forma parte de la clave. Su formato es CI o CI-COMPLEMENTO (por ejemplo, `53535-1K`). En RRHH, el campo técnico que almacena el complemento del CI se llama `ext`. SIAU utiliza el valor canónico devuelto por RRHH y no lo reconstruye. Cargo, unidad y dependencia pueden ayudar en la búsqueda, pero SIAU no los almacena solo porque RRHH los devuelva.
-
-SIAU administra `login`, email, roles, estado de la cuenta, aplicaciones y accesos, contraseñas y acciones de contraseña, sesiones y autenticación. Para nuevas creaciones administrativas solo admite funcionarios vigentes de RRHH. El correo es obligatorio porque la acción `INITIAL_SETUP` se entrega por ese medio; esta regla no modifica retroactivamente las cuentas históricas o importadas que puedan existir sin correo.
-
-La integración mantiene a RRHH detrás del backend de SIAU:
-
-| Sistema | Endpoint | Uso |
-| --- | --- | --- |
-| RRHH | `GET /internal/employees?q=...&page=...&limit=...` | Buscar funcionarios para seleccionarlos. |
-| RRHH | `GET /internal/employees/:relationKey` | Consultar nuevamente al funcionario vigente por su clave. |
-| SIAU | `GET /api/users/employees?q=...&page=...&limit=...` | Exponer la búsqueda administrativa al frontend. |
-| SIAU | `POST /api/users/access` | Crear el usuario con sus accesos. |
-
-El frontend de SIAU nunca consulta RRHH directamente. El flujo de alta es:
-
-1. El administrador busca un funcionario mediante SIAU y selecciona un resultado.
-2. El frontend conserva la `relationKey` seleccionada y la envía con la creación a SIAU.
-3. El backend consulta de nuevo a RRHH por esa `relationKey` para comprobar que el funcionario sigue vigente y recibir `relationKey` y `fullName` autoritativos.
-4. SIAU comprueba que ninguna cuenta esté asociada a la `relationKey` devuelta por RRHH y crea el usuario con sus accesos.
-5. SIAU genera `INITIAL_SETUP` y envía el correo correspondiente.
-
-La búsqueda solo permite seleccionar al funcionario; sus resultados no sustituyen la consulta de RRHH durante el alta. La importación desde Seguimiento de Trámites sigue siendo un flujo independiente: la selección obligatoria desde RRHH se aplica a nuevas creaciones administrativas, no cambia el proceso de importación existente.
-
-## Administración
-
-Un administrador registra una aplicación desde SIAU con:
-
-- `clientId` único;
-- nombre y `launchUrl`;
+- `clientId` único, nombre y `launchUrl`;
 - una o más `redirectUris` exactas;
-- tipo confidencial o público;
-- `backchannelLogoutUri` opcional para recibir notificaciones de Single Logout;
-- estado activo o inactivo.
+- condición de cliente confidencial y secreto;
+- `backchannelLogoutUri` opcional;
+- estado activo o inactivo y usuarios asignados.
 
-Las aplicaciones son confidenciales por defecto. Al crear o regenerar una aplicación, el secreto se devuelve una sola vez y se guarda en PostgreSQL únicamente como hash. El administrador debe transferirlo al backend cliente mediante un canal seguro.
+El secreto se devuelve al crear o regenerar la aplicación y se persiste únicamente como hash. Debe entregarse al backend cliente por un canal seguro. Desactivar la aplicación impide nuevas autorizaciones y renovaciones.
 
-En el alta administrativa descrita arriba, los usuarios no reciben una contraseña temporal conocida: SIAU genera una credencial interna no utilizable. El código de `INITIAL_SETUP` no se expone en la respuesta; si SMTP falla, se informa el fallo de entrega para poder reintentar. La importación controlada puede aprovisionar cuentas sin notificación ni acción. Un administrador puede reenviar una acción pendiente; el nuevo código conserva su propósito y reemplaza al anterior con una nueva expiración.
+## Sesiones, credenciales y revocación
 
-Desactivar un usuario incrementa `credentialVersion`. Un reset administrativo invalida la contraseña actual, marca que debe cambiarse e incrementa la misma versión. En ambos casos, las sesiones SSO y los refresh tokens anteriores dejan de ser válidos por comparación con PostgreSQL; su eliminación en Redis es una limpieza posterior de mejor esfuerzo. Reactivar al usuario no restaura credenciales anteriores.
+La sesión central contiene la identidad del usuario, su versión de credenciales, un `sid` y los clientes participantes. Tiene expiración absoluta y se correlaciona con las sesiones locales mediante `sid`.
 
-La recuperación pública solo crea una acción `PASSWORD_RESET` para un único usuario activo con correo y responde siempre con un mensaje neutro; no invalida la credencial actual hasta que se consume la acción. Completar cualquier acción actualiza la contraseña, incrementa `credentialVersion`, elimina las acciones pendientes y no inicia sesión. `PasswordActionToken` es autorización efímera, no historial ni estado permanente de la cuenta.
+`credentialVersion` permite invalidar sesiones y refresh tokens cuando cambia el estado de seguridad del usuario. Desactivar una cuenta o restablecer administrativamente su contraseña incrementa esa versión; reactivar la cuenta no restaura las credenciales anteriores.
+
+Las acciones de configuración inicial y recuperación son autorizaciones efímeras almacenadas como hash. Consumir una acción actualiza la contraseña, incrementa `credentialVersion`, elimina acciones pendientes y no inicia sesión automáticamente. La recuperación pública responde de forma neutra para no revelar si una cuenta existe.
+
+El flujo completo de autorización, refresh y logout está en [SSO, OAuth y Single Logout](sso-flow.md).
 
 ## Configuración y seguridad
 
-La fuente completa de variables es [`.env.template`](../../.env.template). El arranque las valida con Joi en [`env.validation.ts`](../../src/config/env.validation.ts), convierte números y booleanos y rechaza combinaciones inválidas.
+La fuente completa de variables es [`.env.template`](../../.env.template) y el arranque las valida en [`env.validation.ts`](../../src/config/env.validation.ts).
 
-Decisiones que deben conservarse:
+Decisiones relevantes:
 
-- `IDENTITY_HUB_PUBLIC_URL` es la URL pública del API y el valor exacto de `iss` en los JWT.
-- `IDENTITY_HUB_UI_URL` construye las rutas de la UI. Si su origen difiere del origen público, CORS se habilita solo para ese origen y con credenciales.
-- PostgreSQL usa variables `DATABASE_*`. `DATABASE_SYNCHRONIZE` debe ser `false` en producción.
-- `REDIS_URL` acepta `redis://` o `rediss://`. Redis no es solo caché: perder sus datos cierra sesiones e invalida grants temporales.
-- `JWT_PRIVATE_KEY_PATH` y `JWT_PUBLIC_KEY_PATH` deben apuntar al mismo par RSA. La clave privada debe quedar fuera del repositorio y con acceso restringido.
-- El JWKS actual publica una sola clave con `kid=main-key`. Cambiar el par o el `kid` requiere coordinar cachés y validadores de todos los clientes; no existe una ventana de rotación con varias claves.
-- HTTP está permitido por la validación para redes internas o etapas transitorias. HTTPS es la configuración recomendada porque se transportan credenciales, cookies y tokens.
-- La cookie `session_id` siempre es `HttpOnly`. `IDENTITY_COOKIE_SECURE` y `IDENTITY_COOKIE_SAME_SITE` deben coincidir con el protocolo y la topología; `SameSite=none` se rechaza si la cookie no es segura.
-- Las credenciales SMTP deben configurarse ambas o ninguna. Los códigos de activación y recuperación se almacenan solo como SHA-256.
+- `IDENTITY_HUB_PUBLIC_URL` es la URL pública del API y el valor exacto de `iss`.
+- `IDENTITY_HUB_UI_URL` define el origen y las rutas de la UI; CORS se limita a ese origen cuando difiere del API.
+- `DATABASE_*` configura PostgreSQL y `DATABASE_SYNCHRONIZE` debe ser `false` en producción.
+- `REDIS_URL` acepta `redis://` o `rediss://`.
+- `JWT_PRIVATE_KEY_PATH` y `JWT_PUBLIC_KEY_PATH` deben apuntar al mismo par RSA; la clave privada queda fuera del repositorio y con acceso restringido.
+- El JWKS actual publica una clave con `kid=main-key`; rotar clave o `kid` exige coordinación con los clientes.
+- HTTPS es la configuración recomendada porque se transportan credenciales, cookies y tokens.
+- La cookie central `session_id` es `HttpOnly`; `IDENTITY_COOKIE_SECURE` y `IDENTITY_COOKIE_SAME_SITE` deben coincidir con la topología.
+- Las credenciales SMTP se configuran ambas o ninguna.
 
-## Contratos estables
+## Contratos que requieren migración coordinada
 
-Estos elementos afectan directamente a los clientes y no deben cambiarse sin una migración coordinada:
-
-- issuer, algoritmo RS256, `kid` y JWKS;
-- audiencia basada en `clientId` y claims del access token;
-- `externalKey` como identificador estable de integración del usuario;
-- comparación exacta de `redirect_uri`;
-- parámetros OAuth en `snake_case`, PKCE S256 y formatos de respuesta;
-- rutas públicas `/oauth/authorize`, `/oauth/token` y `/.well-known/jwks.json`;
-- semántica de rotación y revocación de refresh tokens;
-- nombres y atributos de la cookie de sesión central.
-
-El flujo detallado está en [Flujo SSO y OAuth](sso-flow.md). Las obligaciones del cliente están en [Integración de clientes](client-integration.md).
+- issuer, RS256, `kid` y JWKS;
+- audiencia y claims del access token;
+- `externalKey` como identidad estable de integración;
+- coincidencia exacta de `redirect_uri`;
+- parámetros OAuth, PKCE S256 y respuestas de tokens;
+- rutas `/oauth/authorize`, `/oauth/token` y `/.well-known/jwks.json`;
+- rotación y revocación de refresh tokens;
+- correlación por `sid` y formato del Logout Token.

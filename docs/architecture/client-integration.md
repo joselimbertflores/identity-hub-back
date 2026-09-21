@@ -1,169 +1,118 @@
 # Integración de una aplicación cliente
 
-El backend cliente debe controlar OAuth y mantener la sesión local. El frontend solo inicia la navegación, sigue redirects y usa la sesión creada por su backend.
+Esta es la guía oficial para conectar una aplicación con SIAU. La integración debe resolverse en el backend del cliente: el navegador nunca recibe el secreto ni los tokens emitidos por SIAU.
+
+Los detalles del protocolo están en [SSO y Single Logout](sso-flow.md). La arquitectura interna de SIAU está en [Visión general](overview.md).
 
 ## 1. Registrar la aplicación
 
-Un administrador crea la aplicación en SIAU mediante el panel administrativo. La implementación expone esta operación en `POST /api/applications` y exige sesión central con rol `ADMIN`.
+Solicita un registro por cada ambiente y conserva estos datos:
 
-Se debe acordar por ambiente:
+- `clientId`: identificador único del cliente;
+- `clientSecret`: credencial del backend, mostrada al crearla o regenerarla;
+- `launchUrl`: URL que usa el portal de SIAU para iniciar la aplicación; normalmente apunta al endpoint del backend que comienza el flujo SSO, no necesariamente al `/home` ni al frontend principal;
+- `redirectUris`: callbacks permitidos; SIAU exige coincidencia exacta;
+- `backchannelLogoutUri`: endpoint del backend que recibirá notificaciones de cierre de sesión.
 
-- `clientId` único;
-- `launchUrl` del cliente;
-- una o más `redirectUris` completas;
-- tipo confidencial o público;
-- `backchannelLogoutUri` del backend cliente, si implementará Single Logout;
-- issuer esperado, igual a `IDENTITY_HUB_PUBLIC_URL`;
-- URL del JWKS: `/.well-known/jwks.json` sobre el origen público de SIAU.
+Registra la aplicación como **confidential client**. Guarda el secreto en un gestor de secretos o en variables protegidas; no lo incluyas en código, repositorios, logs ni respuestas al frontend. Regenerarlo invalida el valor anterior.
 
-SIAU normaliza `clientId` a minúsculas al crearlo y luego no permite editarlo. El backend cliente debe conservar el valor devuelto por SIAU.
+El administrador de SIAU también debe habilitar para la aplicación a los usuarios que podrán acceder a ella.
 
-La comparación de `redirect_uri` es exacta. No hay comodines, prefijos ni normalización. HTTP funciona si la URI registrada lo usa, pero HTTPS es la opción recomendada.
+## 2. Configurar el backend cliente
 
-Para una aplicación confidencial, el administrador debe guardar el `clientSecret` mostrado al crearla. SIAU solo persiste su hash. Regenerarlo invalida inmediatamente el secreto anterior para nuevas llamadas autenticadas.
+Estos nombres son ilustrativos; usa equivalentes en tu plataforma:
 
-El administrador también asigna usuarios a la aplicación. Sin una asignación activa el usuario no puede autorizar, canjear o refrescar tokens para ese cliente.
+| Variable | Contenido |
+| --- | --- |
+| `SIAU_BASE_URL` | URL pública de SIAU y valor esperado de `iss`. |
+| `SIAU_CLIENT_ID` | `clientId` asignado. |
+| `SIAU_CLIENT_SECRET` | Secreto del cliente confidencial. |
+| `SIAU_REDIRECT_URI` | Callback exacto registrado para el ambiente. |
+| `SIAU_BACKCHANNEL_LOGOUT_URI` | URL exacta del receptor de Single Logout. |
 
-## 2. Implementar el inicio de sesión
+A partir de `SIAU_BASE_URL` se usan `/oauth/authorize`, `/oauth/token`, `/.well-known/jwks.json` y `/internal/sessions/logout`. No compartas configuración ni secretos entre desarrollo, pruebas y producción.
 
-Por cada intento, el backend cliente debe:
+La configuración del almacenamiento, cookie y protección de la sesión local pertenece al cliente y depende de su framework; no forma parte de la configuración exigida por SIAU.
 
-1. Generar un `state` aleatorio, impredecible y de un solo uso.
-2. Generar un `code_verifier` PKCE aleatorio de 43 a 128 caracteres no reservados: letras, dígitos, `.`, `_`, `~` o `-`.
-3. Calcular `code_challenge = base64url(sha256(code_verifier))`, sin padding.
-4. Guardar `state` y `code_verifier` del lado servidor, vinculados al navegador.
-5. Redirigir a SIAU.
+## 3. Implementar Authorization Code + PKCE
 
-```http
-GET /oauth/authorize?response_type=code&client_id=client-app&redirect_uri=https%3A%2F%2Fclient.example%2Fauth%2Fcallback&state=<state>&code_challenge=<challenge>&code_challenge_method=S256
+Por cada inicio de sesión, el backend cliente debe:
+
+1. Generar un `state` aleatorio, de un solo uso, para proteger el callback.
+2. Generar un `code_verifier` PKCE y su `code_challenge` con `S256`.
+3. Guardar `state` y `code_verifier` del lado servidor, asociados al navegador.
+4. Redirigir el navegador a `/oauth/authorize` con `response_type=code`, `client_id`, `redirect_uri`, `state`, `code_challenge` y `code_challenge_method=S256`.
+5. En el callback, comparar y consumir `state`. Rechazar valores ausentes, vencidos o diferentes.
+6. Canjear el `code` desde el backend en `/oauth/token`, enviando el `clientId` y el `clientSecret` mediante HTTP Basic y el `code_verifier` en un formulario `application/x-www-form-urlencoded`.
+
+No envíes `scope`. Un error `access_denied` indica que el usuario no está habilitado para la aplicación y no debe provocar un ciclo automático de reintentos.
+
+```mermaid
+sequenceDiagram
+    participant N as Navegador
+    participant C as Backend cliente
+    participant S as SIAU
+    N->>C: Iniciar sesión
+    C-->>N: Redirect con state y PKCE
+    N->>S: Autorizar
+    S-->>N: Callback con code y state
+    N->>C: Callback
+    C->>S: Canjear code + verifier + credenciales
+    S-->>C: Access token + refresh token + expiraciones
+    C-->>N: Cookie de sesión local
 ```
 
-No se debe enviar `scope`. SIAU pedirá credenciales solo si no existe una sesión SSO reutilizable.
+## 4. Crear y mantener la sesión local
 
-## 3. Procesar el callback
+Valida el access token antes de usarlo: firma RS256 y `kid` contra el JWKS, `iss` igual a `SIAU_BASE_URL`, `aud` igual al `clientId` y `exp` vigente. Conserva en la sesión local el `sid` y la identidad vinculada.
 
-El backend cliente recibe uno de estos resultados:
+La sesión de la aplicación debe ser server-side. Entrega al navegador solo una cookie propia, opaca, `HttpOnly`, `Secure` en HTTPS y con una política `SameSite` adecuada. Guarda access token y refresh token exclusivamente en el backend; no los expongas al frontend, ni siquiera en almacenamiento del navegador.
 
-```text
-https://client.example/auth/callback?code=<code>&state=<state>
-https://client.example/auth/callback?error=access_denied&state=<state>
-```
+La respuesta de tokens contiene:
 
-Debe comparar `state` con igualdad exacta, consumirlo y rechazar callbacks ausentes, vencidos o distintos. Ante `access_denied`, debe informar que el usuario no tiene acceso; no debe repetir el flujo en un ciclo.
+- `expires_in`: segundos restantes del access token;
+- `refresh_token_expires_in`: segundos restantes durante los que puede renovarse la sesión.
 
-## 4. Canjear el code
+Calcula y guarda las expiraciones a partir de cada respuesta. No hardcodees duraciones ni supongas que un refresh reinicia la vigencia total.
 
-El canje se hace desde el backend con formulario URL-encoded. Un cliente confidencial usa HTTP Basic y nunca envía el secreto al navegador ni en el body:
+Al refrescar, reemplaza de forma atómica el refresh token anterior por el nuevo: SIAU lo rota en cada uso. Serializa los refresh de una misma sesión para evitar que dos solicitudes intenten usar el mismo token. Si SIAU responde `invalid_grant`, descarta la credencial y comienza una autorización nueva.
 
-```http
-POST /oauth/token
-Content-Type: application/x-www-form-urlencoded
-Authorization: Basic <base64(client_id:client_secret)>
+## 5. Vincular al usuario local
 
-grant_type=authorization_code&code=<code>&redirect_uri=https%3A%2F%2Fclient.example%2Fauth%2Fcallback&code_verifier=<code-verifier>
-```
+Usa el claim `externalKey` como vínculo estable y único con el usuario local. No uses `login`, nombre, correo ni `sub` como clave de integración.
 
-La codificación de Basic sigue OAuth: `client_id` y secreto se codifican como componentes de formulario antes de unirlos con `:` y aplicar Base64. Un cliente público omite `Authorization` y agrega `client_id` al formulario.
+Elige explícitamente una estrategia:
 
-Respuesta exitosa:
+- **JIT:** en el primer acceso válido, crea el usuario local y guarda su `externalKey`;
+- **vinculación previa:** asocia cada usuario existente con su `externalKey` mediante una migración o una acción administrativa controlada.
 
-```json
-{
-  "access_token": "<jwt>",
-  "refresh_token": "<opaque-token>",
-  "token_type": "Bearer",
-  "expires_in": 600,
-  "refresh_token_expires_in": 36000
-}
-```
+Nunca unas cuentas automáticamente solo porque coinciden el login, nombre o correo. Si necesitas buscar usuarios habilitados para una vinculación previa, el backend puede usar el directorio `/internal/users/assignable` autenticándose con HTTP Basic; esa consulta no debe exponerse directamente al navegador.
 
-El backend guarda los tokens y crea su propia sesión. Debe obtener el claim `sid` del access token y conservarlo en esa sesión local. El refresh se rota enviando `grant_type=refresh_token&refresh_token=<valor-actual>`; cada respuesta exitosa reemplaza el valor anterior. La actualización debe ser atómica y el cliente debe evitar refresh concurrentes para una misma sesión.
+Los roles, permisos, estado y datos propios de la aplicación siguen siendo responsabilidad del cliente.
 
-`refresh_token_expires_in` expresa la vida restante que permite la sesión SIAU. No representa necesariamente 10 horas nuevas después de cada refresh y nunca supera la expiración absoluta de esa sesión.
+## 6. Implementar Single Logout
 
-Los errores de `/oauth/token` usan `error` y `error_description`. `invalid_grant` es definitivo para el code o refresh presentado: se descarta y se inicia una autorización nueva. Un `500` o `503` es un fallo transitorio de infraestructura y no demuestra por sí solo que la credencial sea inválida.
+Cuando el usuario cierre sesión, el frontend debe llamar al backend del cliente. El backend usa el `sid` de la sesión local para solicitar el cierre central en `/internal/sessions/logout` y elimina inmediatamente su propia sesión, cookie y tokens; no debe esperar su propia notificación.
 
-## 5. Validar el access token
+El `backchannelLogoutUri` debe aceptar un `POST` con `logout_token` y:
 
-Antes de aceptar el token, el backend cliente debe:
+1. validar firma RS256 y `kid` con el JWKS;
+2. exigir `typ=logout+jwt`;
+3. validar `iss`, `aud` igual al `clientId` y `exp`, además de exigir un `iat` válido y un `jti` no vacío;
+4. exigir `sid` y el evento `http://schemas.openid.net/event/backchannel-logout`;
+5. eliminar todas las sesiones locales asociadas al `sid`.
 
-1. Seleccionar en JWKS la clave cuyo `kid` coincide con el header.
-2. Permitir únicamente `RS256` y validar la firma.
-3. Comparar `iss` exactamente con el issuer configurado para ese ambiente.
-4. Comparar `aud` con su propio `clientId`.
-5. Validar `exp` con el reloj actual.
-6. Obtener un `sid` válido y guardarlo con la sesión local.
-
-No basta con decodificar el JWT. El claim `clientId` tampoco sustituye la validación de `aud`.
-
-Para vincular un usuario local se debe guardar `externalKey`: identifica de forma estable la cuenta de SIAU y también aparece en el directorio interno. `relationKey`, cuando existe, vincula la cuenta con el funcionario de RRHH y puede usarse para reconciliación. `login` sirve para autenticarse, no como clave de integración. `name` es solo un dato visible y puede cambiar; email y roles no están incluidos en el token. `sub` es el UUID interno de la instancia de SIAU y no debe sustituir a `externalKey` en sincronizaciones entre sistemas.
-
-## 6. Directorio interno opcional
-
-Un backend cliente puede consultar los usuarios activos que SIAU le ha asignado:
-
-| Método | Ruta                                      | Resultado                                          |
-| ------ | ----------------------------------------- | -------------------------------------------------- |
-| `GET`  | `/internal/users/assignable?term=`        | Hasta 20 coincidencias por nombre, correo o login. |
-| `GET`  | `/internal/users/assignable/:externalKey` | Un usuario asignado por su clave estable.          |
-
-Estas rutas son servidor a servidor, no usan la cookie SSO y siempre requieren HTTP Basic con las credenciales de la aplicación, independientemente de su tipo OAuth. La aplicación autenticada determina el filtro; no se puede consultar la asignación de otro cliente.
-
-La consulta individual expone solo:
-
-```json
-{
-  "externalKey": "IDH-U-...",
-  "fullName": "Client User",
-  "email": "user@example.org",
-  "login": "client.user",
-  "relationKey": "53535-1K"
-}
-```
-
-La consulta individual por `externalKey` incluye `relationKey`; el listado no lo expone. El cliente puede usar este contrato para crear o actualizar su usuario local. Sus roles y permisos siguen siendo responsabilidad propia.
-
-## 7. Logout del cliente
-
-El frontend llama únicamente a su propio backend. El backend obtiene el `sid` guardado en la sesión local e inicia el cierre central:
-
-```http
-POST /internal/sessions/logout
-Authorization: Basic <base64(clientId:clientSecret)>
-Content-Type: application/json
-
-{ "sid": "<uuid>" }
-```
-
-SIAU autentica la aplicación, comprueba que participó en ese `sid`, cierra únicamente esa sesión central y notifica a todos sus participantes. Para recibir la notificación, el cliente debe registrar un `backchannelLogoutUri` que acepte:
-
-```text
-Content-Type: application/x-www-form-urlencoded
-
-logout_token=<JWT>
-```
-
-El endpoint debe validar:
-
-- algoritmo RS256 y firma con la clave publicada en JWKS;
-- header `typ=logout+jwt`;
-- `iss` esperado, `aud` igual a su `clientId` y `exp` vigente;
-- `sid`;
-- el evento `http://schemas.openid.net/event/backchannel-logout` dentro de `events`.
-
-Después elimina todas sus sesiones locales asociadas al `sid`. El endpoint back-channel debe ser idempotente: si ya no existe ninguna, responde éxito igualmente.
-
-El cliente que inició el logout elimina también su propia sesión, cookie y tokens locales. No debe depender exclusivamente de recibir después su propia notificación back-channel y decide por sí mismo el redirect del navegador.
+El endpoint debe ser idempotente: si las sesiones ya no existen, responde éxito igualmente. No uses el `sid` como credencial; sirve solo para correlacionar sesiones.
 
 ## Checklist
 
-- Registrar callbacks exactos por ambiente.
-- Mantener el secreto, `state`, `code_verifier` y tokens en el backend.
-- Implementar PKCE S256 y consumir `state` una sola vez.
-- Canjear y refrescar con formulario URL-encoded.
-- Reemplazar el refresh token después de cada rotación.
-- Validar JWKS, RS256, `kid`, `iss`, `aud` y `exp`.
-- Guardar el `sid` en la sesión local e implementar el logout backend-to-backend.
-- Exponer un `backchannelLogoutUri` idempotente y validar el Logout Token.
-- Usar `externalKey`, no `login`, para el vínculo estable del usuario.
-- Mantener sesión, roles y logout propios.
+- [ ] Registro por ambiente con `clientId`, secreto, `launchUrl`, `redirectUris` y `backchannelLogoutUri` correctos.
+- [ ] Backend configurado como confidential client; secreto y tokens fuera del frontend.
+- [ ] Authorization Code con PKCE S256 y `state` impredecible, server-side y de un solo uso.
+- [ ] Access tokens validados con JWKS, RS256, `kid`, `iss`, `aud` y `exp`.
+- [ ] Sesión local server-side con cookie `HttpOnly` y segura para el ambiente.
+- [ ] Expiraciones calculadas desde `expires_in` y `refresh_token_expires_in`, sin tiempos hardcodeados.
+- [ ] Refresh token reemplazado después de cada rotación y refresh concurrentes serializados.
+- [ ] Usuario local vinculado por `externalKey` mediante JIT o vinculación explícita.
+- [ ] `sid` guardado para correlacionar y cerrar todas las sesiones locales correspondientes.
+- [ ] Logout local inmediato y `backchannelLogoutUri` idempotente con validación completa del `logout_token`.
