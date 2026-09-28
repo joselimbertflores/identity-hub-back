@@ -30,7 +30,7 @@ export class UserProvisioningService {
           login: dto.login,
           email: dto.email,
           roles: dto.roles,
-          isActive: dto.isActive,
+          isActive: true,
           applicationIds: dto.applicationIds,
           relationKey: employee.relationKey,
           fullName: employee.fullName,

@@ -19,6 +19,7 @@ export class CreateAdministrativeUserDto extends OmitType(CreateUserWithAccessDt
   'fullName',
   'relationKey',
   'email',
+  'isActive',
 ] as const) {
   @Transform(({ value }: TransformFnParams) => (typeof value === 'string' ? value.trim() : (value as unknown)))
   @IsString()
