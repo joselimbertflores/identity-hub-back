@@ -79,19 +79,50 @@ return result
 `;
 
 const REVOKE_USER_SESSIONS_SCRIPT = `
+local revoked = {}
 local sessions = redis.call('ZRANGE', KEYS[1], 0, -1)
 for _, sessionKey in ipairs(sessions) do
   local raw = redis.call('GET', sessionKey)
   if raw then
     local ok, session = pcall(cjson.decode, raw)
-    if ok and type(session) == 'table' and type(session.sid) == 'string' then
-      redis.call('DEL', ARGV[1] .. session.sid, ARGV[2] .. session.sid)
+    if ok and type(session) == 'table' and type(session.sid) == 'string'
+      and session.userId == ARGV[3] then
+      local clientsKey = ARGV[2] .. session.sid
+      local clients = redis.call('SMEMBERS', clientsKey)
+      table.insert(revoked, cjson.encode({
+        sid = session.sid,
+        userId = session.userId,
+        clientIds = clients
+      }))
+      redis.call('DEL', ARGV[1] .. session.sid, clientsKey)
     end
   end
   redis.call('DEL', sessionKey)
 end
 redis.call('DEL', KEYS[1])
-return #sessions
+return revoked
+`;
+
+const REVOKE_CLIENT_PARTICIPATION_SCRIPT = `
+local revokedSids = {}
+local sessions = redis.call('ZRANGE', KEYS[1], 0, -1)
+for _, sessionKey in ipairs(sessions) do
+  local raw = redis.call('GET', sessionKey)
+  if raw then
+    local ok, session = pcall(cjson.decode, raw)
+    if ok and type(session) == 'table' and type(session.sid) == 'string'
+      and session.userId == ARGV[1] then
+      local clientsKey = ARGV[3] .. session.sid
+      if redis.call('SISMEMBER', clientsKey, ARGV[2]) == 1 then
+        redis.call('SREM', clientsKey, ARGV[2])
+        table.insert(revokedSids, session.sid)
+      end
+    end
+  else
+    redis.call('ZREM', KEYS[1], sessionKey)
+  end
+end
+return revokedSids
 `;
 
 @Injectable()
@@ -101,8 +132,6 @@ export class SessionService {
   async create(session: Omit<AuthSessionPayload, 'sid'>): Promise<string> {
     const sessionId = randomUUID();
     const payload: AuthSessionPayload = { ...session, sid: randomUUID() };
-    if (!isAuthSessionPayload(payload)) throw new Error('Invalid session payload');
-
     await this.redis.eval(
       CREATE_SESSION_SCRIPT,
       3,
@@ -157,14 +186,36 @@ export class SessionService {
     return { sid: revokedSid, userId, clientIds };
   }
 
-  async revokeAllSessionsForUser(userId: string): Promise<void> {
-    await this.redis.eval(
+  async revokeAllSessionsForUser(userId: string): Promise<RevokedSessionContext[]> {
+    const result = (await this.redis.eval(
       REVOKE_USER_SESSIONS_SCRIPT,
       1,
       this.buildUserSessionsKey(userId),
       SESSION_BY_SID_KEY_PREFIX,
       SESSION_CLIENTS_KEY_PREFIX,
-    );
+      userId,
+    )) as string[];
+
+    return result.map((raw) => {
+      const context = JSON.parse(raw) as RevokedSessionContext;
+      return { ...context, clientIds: Array.isArray(context.clientIds) ? context.clientIds : [] };
+    });
+  }
+
+  async revokeClientParticipationForUser(
+    userId: string,
+    clientId: string,
+  ): Promise<RevokedSessionContext[]> {
+    const sids = (await this.redis.eval(
+      REVOKE_CLIENT_PARTICIPATION_SCRIPT,
+      1,
+      this.buildUserSessionsKey(userId),
+      userId,
+      clientId,
+      SESSION_CLIENTS_KEY_PREFIX,
+    )) as string[];
+
+    return sids.map((sid) => ({ sid, userId, clientIds: [clientId] }));
   }
 
   private buildUserSessionsKey(userId: string): string {

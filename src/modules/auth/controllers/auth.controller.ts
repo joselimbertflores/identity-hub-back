@@ -54,9 +54,12 @@ export class AuthController {
   ) {
     const cookieSecure = this.configService.getOrThrow('IDENTITY_COOKIE_SECURE', { infer: true });
     const cookieSameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
-    const result = await this.oauthService.logout(sessionId);
+    const revokedSession = await this.authService.logout(sessionId);
     response.clearCookie(SESSION_COOKIE_NAME, buildSessionCookieClearOptions(cookieSecure, cookieSameSite));
-    return result;
+    return {
+      ok: true,
+      message: revokedSession ? 'Logout successful' : 'Session is already logged out',
+    };
   }
 
   @AllowPasswordChange()

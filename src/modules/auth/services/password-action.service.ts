@@ -5,7 +5,7 @@ import { hash } from 'bcrypt';
 import { createHash, randomInt } from 'node:crypto';
 import { DataSource, EntityManager, LessThanOrEqual } from 'typeorm';
 
-import { EnvironmentVariables } from 'src/config';
+import { EnvironmentVariables, getIdentityHubFrontendUrl } from 'src/config';
 import { User } from 'src/modules/users/entities';
 import { IDENTITY_HUB_UI_PATHS } from '../constants/oauth.constants';
 import { CompletePasswordActionDto } from '../dtos';
@@ -173,7 +173,7 @@ export class PasswordActionService {
       throw new BadRequestException(INVALID_ACTION_MESSAGE);
     }
 
-    await this.authService.cleanupInvalidatedAuthStateForUserBestEffort(changedUser.id);
+    await this.authService.revokeAllUserSessions(changedUser.id);
     if (changedUser.email) {
       try {
         const email = buildPasswordChangedEmail(changedUser.fullName);
@@ -273,7 +273,7 @@ export class PasswordActionService {
   }
 
   private buildActionUrl(code: string): string {
-    const baseUrl = this.configService.getOrThrow('IDENTITY_HUB_UI_URL', { infer: true });
+    const baseUrl = getIdentityHubFrontendUrl(this.configService);
     const url = new URL(IDENTITY_HUB_UI_PATHS.PASSWORD_ACTION, baseUrl);
     url.searchParams.set('code', code);
     return url.toString();

@@ -43,7 +43,7 @@ export class User {
   @Column({ type: 'boolean', default: true })
   mustChangePassword: boolean;
 
-  // Invalidates refresh tokens and SSO sessions issued before the latest credential change.
+  // Invalidates SSO sessions and authorization codes issued before the latest credential change.
   @Column({ type: 'integer', default: 0, select: false })
   credentialVersion: number;
 

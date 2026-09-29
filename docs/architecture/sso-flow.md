@@ -1,32 +1,50 @@
-# SSO, OAuth y Single Logout
+# SSO, OIDC y Single Logout
 
-Este documento describe el contrato técnico de autenticación entre SIAU y sus aplicaciones cliente. Las obligaciones de implementación del cliente están resumidas en [Integración de una aplicación cliente](client-integration.md).
+Este documento describe el contrato técnico entre SIAU y sus aplicaciones cliente. Las obligaciones del integrador están resumidas en [Integración de una aplicación cliente](client-integration.md).
 
 ## Sesión central y sesión local
 
-SIAU mantiene una sesión central en su dominio. Cada aplicación mantiene una sesión local independiente.
+SIAU mantiene una sesión central server-side en su dominio. Cada aplicación mantiene una sesión local independiente.
 
-- `sessionId` identifica la sesión central mediante la cookie privada `session_id`; nunca se entrega al cliente.
-- `sid` correlaciona la sesión central con las sesiones locales participantes. Aparece en los tokens, pero no autentica por sí solo.
+- `session_id` es la cookie privada de la sesión central y nunca se entrega al cliente.
+- `sid` correlaciona esa sesión con las sesiones locales participantes; no autentica por sí solo.
+- Reutilizar SSO evita pedir credenciales de nuevo, pero no extiende la expiración absoluta de la sesión central.
 
-La sesión central tiene expiración absoluta. Reutilizarla para entrar a otra aplicación evita pedir credenciales de nuevo, pero no extiende su vigencia.
+## Authorization Code con PKCE y OpenID Connect
 
-## Authorization Code con PKCE
-
-El cliente inicia la autorización con:
+Por cada intento de inicio, el cliente genera y guarda server-side un `state`, un `nonce` y un `code_verifier`. Inicia la autorización con:
 
 ```http
-GET /oauth/authorize?response_type=code&client_id=<clientId>&redirect_uri=<uri>&state=<state>&code_challenge=<challenge>&code_challenge_method=S256
+GET /oauth/authorize?response_type=code&client_id=<clientId>&redirect_uri=<uri>&scope=openid&state=<state>&nonce=<nonce>&code_challenge=<challenge>&code_challenge_method=S256
 ```
 
-SIAU valida que la aplicación esté activa, que `redirect_uri` coincida exactamente con una URI registrada y que el usuario esté habilitado. Si no existe una sesión central válida, conserva temporalmente la solicitud y conduce al usuario por el login. Después devuelve al callback:
+SIAU valida la forma de los parámetros y exige exactamente:
+
+- `response_type=code`;
+- `scope=openid`;
+- `state` y `nonce` no vacíos;
+- challenge PKCE válido y `code_challenge_method=S256`.
+
+Antes de emitir cada código, incluso con una sesión SSO existente, también comprueba:
+
+- usuario activo y versión de credenciales vigente;
+- aplicación activa;
+- `redirect_uri` registrada mediante coincidencia exacta;
+- cuenta sin `mustChangePassword`;
+- asignación vigente del usuario a la aplicación.
+
+Si no existe una sesión central válida, SIAU conserva temporalmente la solicitud completa, incluido el `nonce`, y conduce al login. El resultado vuelve al callback con el mismo `state`:
 
 ```text
 <redirect_uri>?code=<code>&state=<state>
 <redirect_uri>?error=access_denied&state=<state>
 ```
 
-El authorization code es temporal y de un solo uso. El backend de un cliente confidencial lo canjea así:
+El authorization code guarda de forma temporal `clientId`, `redirectUri`, `scope`, `nonce`, PKCE, `sid`, usuario y versión de credenciales.
+
+## Canje y tokens
+
+Un cliente confidencial canjea el código desde su backend:
 
 ```http
 POST /oauth/token
@@ -36,35 +54,42 @@ Authorization: Basic <base64(formEncode(clientId):formEncode(clientSecret))>
 grant_type=authorization_code&code=<code>&redirect_uri=<uri>&code_verifier=<verifier>
 ```
 
-`redirect_uri` debe ser idéntica a la usada durante la autorización. SIAU verifica además el `code_verifier` contra el challenge S256.
+SIAU vuelve a comprobar cliente activo, usuario elegible, asignación, versión de credenciales, sesión central, URI exacta y PKCE. Consumir el código, comprobar la sesión por `sid` y registrar al cliente participante es una operación atómica. El código es de un solo uso.
 
-## Tokens y refresh
+La respuesta exitosa es:
 
-Una respuesta exitosa contiene:
-
-| Campo | Tipo y significado |
-| --- | --- |
-| `access_token` | JWT firmado. |
-| `refresh_token` | Token opaco y rotativo. |
-| `token_type` | `Bearer`. |
-| `expires_in` | Entero: vigencia restante del access token, en segundos. |
-| `refresh_token_expires_in` | Entero: ventana restante de renovación, en segundos. |
-
-El access token está firmado con RS256 y contiene, entre otros, `iss`, `aud`, `exp`, `sub`, `sid`, `externalKey`, `name` y `clientId`. El JWKS se publica en `GET /.well-known/jwks.json`.
-
-El refresh usa el mismo endpoint:
-
-```http
-POST /oauth/token
-Content-Type: application/x-www-form-urlencoded
-Authorization: Basic <credenciales del cliente>
-
-grant_type=refresh_token&refresh_token=<token-actual>
+```json
+{
+  "access_token": "<jwt>",
+  "id_token": "<jwt>",
+  "token_type": "Bearer",
+  "expires_in": 600
+}
 ```
 
-Cada refresh exitoso consume el token presentado y devuelve uno nuevo. La operación de rotación y la comprobación de la sesión central son atómicas. `refresh_token_expires_in` refleja la vida restante de esa sesión; no concede una ventana completa nueva.
+No se emite refresh token y `grant_type=refresh_token` no está soportado.
 
-Los errores del endpoint usan `error` y `error_description`. `invalid_grant` invalida el code o refresh presentado. Un error transitorio de infraestructura no demuestra por sí solo que la credencial haya sido consumida o invalidada.
+El `id_token` usa RS256 y contiene únicamente los claims de identidad y protocolo requeridos:
+
+```text
+iss
+sub
+aud
+iat
+exp
+nonce
+sid
+externalKey
+name
+```
+
+- `sub` es el identificador OIDC estable del usuario.
+- `aud` es el `clientId`.
+- `nonce` es exactamente el recibido en la autorización.
+- `externalKey` es el vínculo institucional para el usuario local.
+- `sid` correlaciona la sesión local con Single Logout.
+
+El JWKS se publica en `GET /.well-known/jwks.json`. El access token también está firmado con RS256 y se entrega como parte normal de OAuth, pero este perfil no lo usa para sostener la sesión local.
 
 ## Reutilización de SSO
 
@@ -74,21 +99,22 @@ sequenceDiagram
     participant A as Cliente A
     participant B as Cliente B
     participant S as SIAU
-    N->>A: Acceder
-    A-->>N: Autorizar
+    N->>A: Iniciar sesión
+    A-->>N: /authorize con state, nonce y PKCE
     N->>S: Login
     S-->>N: code para A
-    N->>B: Acceder
-    B-->>N: Autorizar
-    N->>S: Cookie de sesión central
+    A->>S: /token
+    S-->>A: id_token + access_token
+    N->>B: Iniciar sesión
+    B-->>N: /authorize con nuevos state, nonce y PKCE
+    N->>S: Cookie SSO existente
+    S->>S: Revalidar usuario, cuenta, app y asignación
     S-->>N: code para B sin nuevo login
 ```
 
-SIAU registra como participante a cada cliente que completa el canje. Ese conjunto determina qué aplicaciones reciben una notificación de Single Logout.
+## Revocación y Single Logout
 
-## Single Logout
-
-Un cliente participante puede iniciar el cierre desde su backend:
+SIAU conserva los clientes participantes por `sid`. Un cliente participante puede iniciar cierre central desde su backend:
 
 ```http
 POST /internal/sessions/logout
@@ -98,7 +124,9 @@ Content-Type: application/json
 { "sid": "<uuid>" }
 ```
 
-SIAU comprueba que el solicitante participó en esa sesión, elimina la sesión central y envía un `POST` a cada `backchannelLogoutUri` participante:
+También disparan revocación la desactivación del usuario, los cambios de credenciales y el retiro de una asignación. Al revocar una sesión completa se notifica a todos sus participantes; al retirar una asignación se notifica únicamente al cliente afectado.
+
+Cada `backchannelLogoutUri` recibe:
 
 ```text
 Content-Type: application/x-www-form-urlencoded
@@ -116,20 +144,4 @@ El Logout Token usa RS256, header `typ: logout+jwt` y contiene `iss`, `aud`, `ia
 }
 ```
 
-No contiene `nonce`. La clave de `events` es un identificador, no una URL que deba consultarse. Cada receptor valida el JWT y elimina todas sus sesiones locales asociadas al `sid`.
-
-```mermaid
-sequenceDiagram
-    participant N as Navegador
-    participant A as Cliente iniciador
-    participant S as SIAU
-    participant B as Otro cliente
-    N->>A: Cerrar sesión
-    A->>S: Logout central con sid
-    A->>A: Eliminar sesión local
-    S->>A: logout_token
-    S->>B: logout_token
-    B->>B: Eliminar sesiones por sid
-```
-
-Los envíos back-channel son independientes. El fallo de un receptor se registra, pero no revierte el cierre central ni el de otros clientes. SIAU no depende de redirigir el navegador para propagar el logout.
+No contiene `nonce`. Cada receptor valida el JWT y elimina todas sus sesiones locales asociadas al `sid`. El endpoint receptor debe ser idempotente. Un fallo de entrega se registra, pero no restaura la sesión o participación ya revocada.

@@ -7,7 +7,7 @@ import { Application } from '../entities';
 
 @Injectable()
 export class UserApplicationsService {
-  async syncApplications(userId: string, applicationIds: number[], manager: EntityManager): Promise<void> {
+  async syncApplications(userId: string, applicationIds: number[], manager: EntityManager): Promise<string[]> {
     const appRepository = manager.getRepository(Application);
 
     const uniqueIds = [...new Set(applicationIds)];
@@ -31,14 +31,17 @@ export class UserApplicationsService {
       .loadMany<Application>();
 
     const currentIds = currentApplications.map((app) => app.id);
-
     const idsToAdd = uniqueIds.filter((id) => !currentIds.includes(id));
     const idsToRemove = currentIds.filter((id) => !uniqueIds.includes(id));
+    const removedClientIds = currentApplications
+      .filter((application) => idsToRemove.includes(application.id))
+      .map((application) => application.clientId);
 
     if (idsToAdd.length === 0 && idsToRemove.length === 0) {
-      return;
+      return [];
     }
 
     await manager.createQueryBuilder().relation(User, 'applications').of(userId).addAndRemove(idsToAdd, idsToRemove);
+    return removedClientIds;
   }
 }

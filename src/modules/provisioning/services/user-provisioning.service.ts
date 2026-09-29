@@ -63,17 +63,22 @@ export class UserProvisioningService {
     const { applicationIds, ...userDto } = dto;
     const result = await this.dataSource.transaction(async (manager) => {
       const { user, credentialsInvalidated } = await this.usersService.update(id, userDto, manager);
-      if (applicationIds !== undefined) {
-        await this.userApplicationsService.syncApplications(user.id, applicationIds, manager);
-      }
+      const removedClientIds =
+        applicationIds === undefined
+          ? []
+          : await this.userApplicationsService.syncApplications(user.id, applicationIds, manager);
+
       return {
         user: await this.usersService.findOneWithApplications(user.id, manager),
         credentialsInvalidated,
+        removedClientIds,
       };
     });
 
     if (result.credentialsInvalidated) {
-      await this.authService.cleanupInvalidatedAuthStateForUserBestEffort(result.user.id);
+      await this.authService.revokeAllUserSessions(result.user.id);
+    } else if (result.removedClientIds.length > 0) {
+      await this.authService.revokeApplicationAccessForUser(result.user.id, result.removedClientIds);
     }
 
     return { user: result.user };
@@ -87,7 +92,7 @@ export class UserProvisioningService {
       return { user, action };
     });
 
-    await this.authService.cleanupInvalidatedAuthStateForUserBestEffort(result.user.id);
+    await this.authService.revokeAllUserSessions(result.user.id);
     const passwordAction = await this.passwordActionService.deliver(result.user, result.action);
 
     return {

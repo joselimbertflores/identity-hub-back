@@ -7,7 +7,7 @@ export interface EnvironmentVariables {
   NODE_ENV: NodeEnvironment;
   PORT: number;
   IDENTITY_HUB_PUBLIC_URL: string;
-  IDENTITY_HUB_UI_URL: string;
+  IDENTITY_HUB_UI_URL?: string;
   DATABASE_HOST: string;
   DATABASE_PORT: number;
   DATABASE_NAME: string;
@@ -42,7 +42,7 @@ export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables>
   NODE_ENV: Joi.string().valid('development', 'test', 'production').required(),
   PORT: portSchema.required(),
   IDENTITY_HUB_PUBLIC_URL: httpUrlSchema.required(),
-  IDENTITY_HUB_UI_URL: httpUrlSchema.required(),
+  IDENTITY_HUB_UI_URL: httpUrlSchema.optional(),
   DATABASE_HOST: Joi.string().trim().min(1).required(),
   DATABASE_PORT: portSchema.required(),
   DATABASE_NAME: Joi.string().trim().min(1).required(),

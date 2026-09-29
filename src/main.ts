@@ -30,9 +30,12 @@ async function bootstrap() {
   );
 
   const publicOrigin = new URL(configService.getOrThrow('IDENTITY_HUB_PUBLIC_URL', { infer: true })).origin;
-  const uiOrigin = new URL(configService.getOrThrow('IDENTITY_HUB_UI_URL', { infer: true })).origin;
-  if (uiOrigin !== publicOrigin) {
-    app.enableCors({ origin: uiOrigin, credentials: true });
+  const uiUrl = configService.get('IDENTITY_HUB_UI_URL', { infer: true });
+  if (uiUrl) {
+    const uiOrigin = new URL(uiUrl).origin;
+    if (uiOrigin !== publicOrigin) {
+      app.enableCors({ origin: uiOrigin, credentials: true });
+    }
   }
 
   await app.listen(configService.getOrThrow('PORT', { infer: true }));

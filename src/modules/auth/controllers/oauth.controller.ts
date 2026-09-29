@@ -17,7 +17,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { Response } from 'express';
 
-import { AuthorizeParamsDto, GrantType, LoginDto, LoginParamsDto, TokenRequestDto } from '../dtos';
+import { AuthorizeParamsDto, LoginDto, LoginParamsDto, TokenRequestDto } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Cookies, Public } from '../decorators';
@@ -28,7 +28,6 @@ import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
 import { buildSessionCookieOptions, SESSION_COOKIE_NAME } from '../constants/session.constants';
 
 const TOKEN_FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded';
-const SUPPORTED_GRANT_TYPES = new Set<string>(Object.values(GrantType));
 
 interface BasicClientCredentials {
   clientId: string;
@@ -104,22 +103,17 @@ export class OAuthController {
 
       const basicCredentials = this.parseBasicClientCredentials(authorization);
       const request = await this.parseTokenRequest(form, basicCredentials?.clientId);
-      const authentication = this.resolveClientAuthentication(
-        request,
-        basicCredentials,
-        Object.hasOwn(form, 'client_id'),
-      );
-      const tokenPair = await this.tokenService.handleTokenRequest(request, authentication);
+      const authentication = this.resolveClientAuthentication(request.clientId, basicCredentials);
+      const tokens = await this.tokenService.handleTokenRequest(request, authentication);
 
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Pragma', 'no-cache');
 
       return {
-        access_token: tokenPair.accessToken,
-        refresh_token: tokenPair.refreshToken,
-        token_type: tokenPair.tokenType,
-        expires_in: tokenPair.accessTokenExpiresIn,
-        refresh_token_expires_in: tokenPair.refreshTokenExpiresIn,
+        access_token: tokens.accessToken,
+        id_token: tokens.idToken,
+        token_type: tokens.tokenType,
+        expires_in: tokens.accessTokenExpiresIn,
       };
     } catch (error: unknown) {
       const endpointError =
@@ -156,19 +150,8 @@ export class OAuthController {
       throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_REQUEST);
     }
 
-    if (!SUPPORTED_GRANT_TYPES.has(grantType)) {
+    if (grantType !== 'authorization_code') {
       throw new OAuthTokenException(OAuthTokenErrorCode.UNSUPPORTED_GRANT_TYPE);
-    }
-
-    const supportedGrantType = grantType as GrantType;
-    const isAuthorizationCode = supportedGrantType === GrantType.AUTHORIZATION_CODE;
-    const hasRefreshToken = Object.hasOwn(form, 'refresh_token');
-    const hasAuthorizationCodeFields = ['code', 'redirect_uri', 'code_verifier'].some((field) =>
-      Object.hasOwn(form, field),
-    );
-
-    if ((isAuthorizationCode && hasRefreshToken) || (!isAuthorizationCode && hasAuthorizationCodeFields)) {
-      throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_REQUEST);
     }
 
     const normalizedForm =
@@ -182,15 +165,10 @@ export class OAuthController {
   }
 
   private resolveClientAuthentication(
-    request: TokenRequestDto,
+    clientId: string,
     basicCredentials: BasicClientCredentials | null,
-    hasBodyClientId: boolean,
   ): TokenClientAuthentication {
     if (basicCredentials) {
-      if (hasBodyClientId && basicCredentials.clientId !== request.clientId) {
-        throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
-      }
-
       return {
         method: 'basic',
         clientId: basicCredentials.clientId,
@@ -198,7 +176,7 @@ export class OAuthController {
       };
     }
 
-    return { method: 'none', clientId: request.clientId };
+    return { method: 'none', clientId };
   }
 
   private parseBasicClientCredentials(authorization: string | undefined): BasicClientCredentials | null {

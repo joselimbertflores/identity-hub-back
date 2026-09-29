@@ -1,47 +1,50 @@
 # Visión general
 
-SIAU centraliza identidad y acceso para aplicaciones cliente. Autentica usuarios, mantiene una sesión SSO en su propio dominio y emite credenciales OAuth a clientes autorizados.
+SIAU centraliza identidad y acceso para aplicaciones institucionales. Autentica usuarios, mantiene una sesión SSO server-side en su propio dominio y expone un perfil OpenID Connect mínimo sobre Authorization Code con PKCE S256.
 
-No es un proveedor OpenID Connect completo: no emite `id_token`, no publica discovery y no implementa scopes ni `userinfo`.
+No pretende ser un proveedor de identidad genérico. No implementa discovery, UserInfo, scopes adicionales, registro dinámico ni `offline_access`.
 
 ## Límites y responsabilidades
 
 SIAU:
 
 - administra usuarios, credenciales, aplicaciones y asignaciones de acceso;
-- ejecuta Authorization Code con PKCE S256;
-- emite access tokens JWT RS256 y refresh tokens rotativos;
-- publica el JWKS para validar access tokens y Logout Tokens;
-- mantiene la sesión SSO y coordina Single Logout;
+- ejecuta Authorization Code con `scope=openid`, `state`, `nonce` y PKCE S256;
+- emite `id_token` y `access_token` JWT firmados con RS256;
+- publica el JWKS para validar ID Tokens, access tokens y Logout Tokens;
+- mantiene la sesión SSO y coordina Single Logout por `sid`;
 - gestiona activación inicial, cambio y recuperación de contraseña;
 - integra fuentes institucionales de identidad detrás de su propio backend.
 
-Cada aplicación cliente mantiene su sesión, usuarios locales cuando corresponda, roles, permisos y reglas de negocio. La sesión central no reemplaza la sesión local. La guía del integrador está en [Integración de una aplicación cliente](client-integration.md).
+SIAU no emite refresh tokens. Cada aplicación cliente establece y mantiene una sesión local server-side después de validar el `id_token`. El access token sigue formando parte de la respuesta OAuth/OIDC, pero no es la credencial con la que estos clientes mantienen esa sesión.
+
+Cada aplicación conserva sus usuarios locales cuando corresponda, roles, permisos y reglas de negocio. La guía del integrador está en [Integración de una aplicación cliente](client-integration.md).
 
 ## Componentes
 
 | Componente | Responsabilidad |
 | --- | --- |
 | UI de SIAU | Login, portal, contraseñas y administración. |
-| API de SIAU | Sesiones, OAuth, usuarios, aplicaciones, asignaciones y JWKS. |
+| API de SIAU | Sesiones, OIDC, usuarios, aplicaciones, asignaciones y JWKS. |
 | PostgreSQL | Estado persistente de usuarios, aplicaciones, asignaciones y acciones de contraseña. |
-| Redis | Sesiones centrales, estado OAuth temporal, codes, refresh tokens e índices de revocación. |
-| Backend cliente | Estado PKCE, callback, tokens y sesión local. |
+| Redis | Sesiones centrales, solicitudes OIDC pendientes, authorization codes e índices de participantes. |
+| Backend cliente | Estado `state`/PKCE/`nonce`, callback, validación del ID Token y sesión local. |
 
-Redis forma parte del estado de seguridad y no es solo caché: perderlo cierra sesiones e invalida credenciales temporales. El consumo de authorization codes, la rotación de refresh tokens y las comprobaciones ligadas a la sesión se realizan de forma atómica.
+Redis forma parte del estado de seguridad y no es solo caché: perderlo cierra sesiones e invalida solicitudes y códigos temporales. El consumo de un authorization code, la comprobación de la sesión central y el registro del cliente participante se realizan de forma atómica.
 
 ## Identidad y aprovisionamiento
 
 Los identificadores tienen responsabilidades diferentes:
 
-- `externalKey` es la identidad estable que persisten las aplicaciones cliente;
-- `relationKey` vincula internamente la cuenta con una fuente institucional de personas y puede faltar en cuentas históricas;
+- `sub` es el identificador OIDC estable del usuario dentro de SIAU;
+- `externalKey` es la identidad institucional estable que persisten las aplicaciones cliente;
+- `relationKey` vincula internamente la cuenta con una fuente institucional de personas;
 - `login` sirve para autenticarse y puede cambiar;
-- `sub` identifica al usuario dentro de esta instancia de SIAU.
+- `sid` correlaciona una sesión SSO con las sesiones locales participantes.
 
-Las altas administrativas verifican la identidad contra la fuente institucional desde el backend. La interfaz de SIAU no consulta esa fuente directamente ni considera autoritativos los resultados que devuelve una búsqueda previa. Los procesos controlados de importación son independientes de las altas nuevas.
+Las altas administrativas verifican la identidad contra la fuente institucional desde el backend. Los procesos controlados de importación son independientes de las altas nuevas.
 
-Una aplicación solo puede obtener o refrescar credenciales para usuarios activos que tenga asignados. El directorio server-to-server `/internal/users/assignable` aplica la misma asignación y permite a un cliente confidencial preparar vinculaciones por `externalKey`; no expone roles internos de SIAU ni sustituye la autorización local.
+Antes de emitir cada authorization code, incluso al reutilizar SSO, SIAU exige que el usuario y la aplicación estén activos, que la cuenta no requiera cambio de contraseña y que el usuario continúe asignado a la aplicación. El endpoint server-to-server `/internal/users/assignable` aplica la misma asignación para preparar vinculaciones por `externalKey`.
 
 ## Aplicaciones cliente
 
@@ -53,17 +56,22 @@ El registro de una aplicación define:
 - `backchannelLogoutUri` opcional;
 - estado activo o inactivo y usuarios asignados.
 
-El secreto se devuelve al crear o regenerar la aplicación y se persiste únicamente como hash. Debe entregarse al backend cliente por un canal seguro. Desactivar la aplicación impide nuevas autorizaciones y renovaciones.
+El secreto se devuelve al crear o regenerar la aplicación y se persiste únicamente como hash. Desactivar la aplicación impide nuevas autorizaciones y canjes. Para aplicaciones con asignación, retirarla revoca la participación de ese cliente en las sesiones del usuario y dispara Back-Channel Logout.
 
-## Sesiones, credenciales y revocación
+## Sesiones y revocación
 
-La sesión central contiene la identidad del usuario, su versión de credenciales, un `sid` y los clientes participantes. Tiene expiración absoluta y se correlaciona con las sesiones locales mediante `sid`.
+La sesión central contiene la identidad del usuario, su versión de credenciales y un `sid`. Los clientes se registran como participantes únicamente cuando completan el canje del authorization code.
 
-`credentialVersion` permite invalidar sesiones y refresh tokens cuando cambia el estado de seguridad del usuario. Desactivar una cuenta o restablecer administrativamente su contraseña incrementa esa versión; reactivar la cuenta no restaura las credenciales anteriores.
+`credentialVersion` invalida sesiones y códigos emitidos antes del último cambio de credenciales. Desactivar una cuenta, cambiar o restablecer su contraseña revoca sus sesiones centrales; antes de eliminarlas SIAU conserva los `sid` y clientes participantes para enviar Back-Channel Logout. Reactivar la cuenta no restaura sesiones anteriores.
 
-Las acciones de configuración inicial y recuperación son autorizaciones efímeras almacenadas como hash. Consumir una acción actualiza la contraseña, incrementa `credentialVersion`, elimina acciones pendientes y no inicia sesión automáticamente. La recuperación pública responde de forma neutra para no revelar si una cuenta existe.
+Los eventos cubiertos son:
 
-El flujo completo de autorización, refresh y logout está en [SSO, OAuth y Single Logout](sso-flow.md).
+- logout explícito, iniciado en SIAU o por un cliente participante;
+- desactivación del usuario;
+- cambio o restablecimiento de credenciales;
+- retiro de acceso del usuario a una aplicación.
+
+El retiro de una asignación elimina solo la participación afectada. Los demás eventos anteriores revocan la sesión central completa. La entrega back-channel es independiente por cliente: un fallo se registra y no revierte la revocación ya aplicada.
 
 ## Configuración y seguridad
 
@@ -71,23 +79,22 @@ La fuente completa de variables es [`.env.template`](../../.env.template) y el a
 
 Decisiones relevantes:
 
-- `IDENTITY_HUB_PUBLIC_URL` es la URL pública del API y el valor exacto de `iss`.
-- `IDENTITY_HUB_UI_URL` define el origen y las rutas de la UI; CORS se limita a ese origen cuando difiere del API.
-- `DATABASE_*` configura PostgreSQL y `DATABASE_SYNCHRONIZE` debe ser `false` en producción.
-- `REDIS_URL` acepta `redis://` o `rediss://`.
-- `JWT_PRIVATE_KEY_PATH` y `JWT_PUBLIC_KEY_PATH` deben apuntar al mismo par RSA; la clave privada queda fuera del repositorio y con acceso restringido.
-- El JWKS actual publica una clave con `kid=main-key`; rotar clave o `kid` exige coordinación con los clientes.
-- HTTPS es la configuración recomendada porque se transportan credenciales, cookies y tokens.
-- La cookie central `session_id` es `HttpOnly`; `IDENTITY_COOKIE_SECURE` y `IDENTITY_COOKIE_SAME_SITE` deben coincidir con la topología.
-- Las credenciales SMTP se configuran ambas o ninguna.
+- `IDENTITY_HUB_PUBLIC_URL` es la URL pública canónica de SIAU, la base predeterminada de la UI y el valor exacto de `iss`.
+- `IDENTITY_HUB_UI_URL` es un override opcional para la UI cuando usa otro origen; solo en ese caso se habilita CORS con credenciales para ese origen.
+- `JWT_PRIVATE_KEY_PATH` y `JWT_PUBLIC_KEY_PATH` apuntan al mismo par RSA.
+- El JWKS publica la clave de firma RS256 con `kid=main-key`.
+- La cookie central `session_id` es `HttpOnly`; sus opciones `Secure` y `SameSite` dependen del ambiente.
+- Las coincidencias de `redirect_uri` son exactas.
+- Las solicitudes usan exclusivamente PKCE `S256`.
 
 ## Contratos que requieren migración coordinada
 
 - issuer, RS256, `kid` y JWKS;
-- audiencia y claims del access token;
-- `externalKey` como identidad estable de integración;
-- coincidencia exacta de `redirect_uri`;
-- parámetros OAuth, PKCE S256 y respuestas de tokens;
-- rutas `/oauth/authorize`, `/oauth/token` y `/.well-known/jwks.json`;
-- rotación y revocación de refresh tokens;
+- `scope=openid`, `nonce`, `state` y PKCE S256;
+- respuesta `access_token` + `id_token`, sin refresh token;
+- audiencia y claims del ID Token;
+- `externalKey` como vínculo institucional estable;
+- rutas `/oauth/authorize`, `/oauth/token`, `/.well-known/jwks.json` y `/internal/sessions/logout`;
 - correlación por `sid` y formato del Logout Token.
+
+El flujo completo está en [SSO, OIDC y Single Logout](sso-flow.md).

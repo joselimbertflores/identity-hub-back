@@ -6,18 +6,19 @@ import { Application } from 'src/modules/access/entities';
 import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from 'src/config/rate-limit.config';
 
 import { LogoutSessionDto } from '../dtos';
-import { OAuthService } from '../services';
+import { AuthService } from '../services';
 
 @UseGuards(ThrottlerGuard)
 @Throttle({ default: { ttl: RATE_LIMIT_TTL_MS, limit: RATE_LIMITS.INTERNAL } })
 @ApplicationClientAuth()
 @Controller('internal/sessions')
 export class InternalSessionController {
-  constructor(private readonly oauthService: OAuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@AuthenticatedApplication() application: Application, @Body() body: LogoutSessionDto) {
-    return this.oauthService.logoutBySid(body.sid, application.clientId);
+  async logout(@AuthenticatedApplication() application: Application, @Body() body: LogoutSessionDto) {
+    await this.authService.logoutBySid(body.sid, application.clientId);
+    return { ok: true, message: 'Logout successful' };
   }
 }

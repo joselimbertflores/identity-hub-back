@@ -1,22 +1,20 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import Redis from 'ioredis';
 
 import { LoginParamsDto, AuthorizeParamsDto } from '../dtos';
 import { AuthException } from '../exceptions/auth.exception';
 import { Application } from 'src/modules/access/entities';
 import { PendingAuthorizationRequest } from '../interfaces';
-import { EnvironmentVariables } from 'src/config';
+import { EnvironmentVariables, getIdentityHubFrontendUrl } from 'src/config';
 import { TokenService } from './token.service';
 import { AuthService } from './auth.service';
-import { SessionService } from './session.service';
 import { UsersService } from 'src/modules/users/services';
 import {
-  BACKCHANNEL_LOGOUT_TIMEOUT_MS,
   IDENTITY_HUB_UI_PATHS,
   PENDING_AUTH_REQUEST_KEY_PREFIX,
   PENDING_AUTH_REQUEST_TTL_SECONDS,
@@ -24,15 +22,12 @@ import {
 
 @Injectable()
 export class OAuthService {
-  private readonly logger = new Logger(OAuthService.name);
-
   constructor(
     @InjectRepository(Application) private readonly appRepository: Repository<Application>,
     @InjectRedis() private readonly redis: Redis,
     private readonly configService: ConfigService<EnvironmentVariables, true>,
     private readonly tokenService: TokenService,
     private readonly authService: AuthService,
-    private readonly sessionService: SessionService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -79,28 +74,6 @@ export class OAuthService {
     return this.buildClientRedirectUrl(params.redirectUri, { code, state: params.state });
   }
 
-  async logout(sessionId: string | undefined) {
-    const revokedSession = await this.authService.logout(sessionId);
-    if (revokedSession) {
-      await this.notifyBackchannelLogout(revokedSession.sid, revokedSession.clientIds);
-    }
-
-    return {
-      ok: true,
-      message: revokedSession ? 'Logout successful' : 'Session is already logged out',
-    };
-  }
-
-  async logoutBySid(sid: string, requestingClientId: string) {
-    const revokedSession = await this.sessionService.removeBySid(sid, requestingClientId);
-    if (!revokedSession) {
-      throw new NotFoundException('Session not found or unavailable for this client');
-    }
-
-    await this.notifyBackchannelLogout(revokedSession.sid, revokedSession.clientIds);
-    return { ok: true, message: 'Logout successful' };
-  }
-
   async resolvePostLoginRedirect(
     { authRequestId }: LoginParamsDto,
     sessionId: string,
@@ -130,11 +103,12 @@ export class OAuthService {
       client_id: pendingReq.clientId,
       redirect_uri: pendingReq.redirectUri,
       response_type: 'code',
+      scope: pendingReq.scope,
+      nonce: pendingReq.nonce,
+      state: pendingReq.state,
       code_challenge: pendingReq.codeChallenge,
       code_challenge_method: pendingReq.codeChallengeMethod,
     });
-
-    params.set('state', pendingReq.state);
 
     return `/oauth/authorize?${params.toString()}`;
   }
@@ -144,40 +118,6 @@ export class OAuthService {
       error: error.code,
       auth_request_id: params.authRequestId,
     });
-  }
-
-  private async notifyBackchannelLogout(sid: string, clientIds: string[]): Promise<void> {
-    if (clientIds.length === 0) return;
-
-    let applications: Application[];
-    try {
-      applications = await this.appRepository.find({ where: { clientId: In([...new Set(clientIds)]) } });
-    } catch {
-      this.logger.warn('Could not load applications for back-channel logout');
-      return;
-    }
-
-    await Promise.all(applications.map((app) => this.sendBackchannelLogout(app, sid)));
-  }
-
-  private async sendBackchannelLogout(app: Application, sid: string): Promise<void> {
-    if (!app.backchannelLogoutUri) return;
-
-    try {
-      const logoutToken = await this.tokenService.createLogoutToken(sid, app.clientId);
-      const response = await fetch(app.backchannelLogoutUri, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ logout_token: logoutToken }),
-        signal: AbortSignal.timeout(BACKCHANNEL_LOGOUT_TIMEOUT_MS),
-      });
-
-      if (!response.ok) {
-        this.logger.warn(`Back-channel logout failed for client ${app.clientId} with status ${response.status}`);
-      }
-    } catch {
-      this.logger.warn(`Back-channel logout failed for client ${app.clientId}`);
-    }
   }
 
   private async createPendingAuthRequest(params: AuthorizeParamsDto, sessionId?: string): Promise<string> {
@@ -212,7 +152,7 @@ export class OAuthService {
     const existingRequest = this.parsePendingAuthRequest(existingData);
     if (existingRequest.sessionId !== sessionId) return null;
 
-    // A pending OAuth request should resume at most once after login or password change.
+    // A pending OIDC request should resume at most once after login or password change.
     const consumedData = await this.redis.getdel(key);
     if (!consumedData) return null;
 
@@ -234,7 +174,7 @@ export class OAuthService {
   }
 
   private buildIdentityHubUiUrl(path: string, params?: Record<string, string | undefined>): string {
-    const baseUrl = this.configService.getOrThrow('IDENTITY_HUB_UI_URL', { infer: true });
+    const baseUrl = getIdentityHubFrontendUrl(this.configService);
     const url = new URL(path, baseUrl);
     for (const [key, value] of Object.entries(params ?? {})) {
       if (value) {

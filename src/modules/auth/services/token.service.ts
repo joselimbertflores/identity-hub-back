@@ -8,13 +8,12 @@ import {
   AccessTokenPayload,
   AuthSessionPayload,
   AuthorizationCodePayload,
-  isAuthSessionPayload,
-  PreparedTokenPair,
-  RefreshTokenPayload,
-  StoredRefreshToken,
+  IdTokenPayload,
+  isAuthorizationCodePayload,
+  IssuedTokens,
   TokenClientAuthentication,
 } from '../interfaces';
-import { AuthorizeParamsDto, GrantType, TokenRequestDto } from '../dtos';
+import { AuthorizeParamsDto, TokenRequestDto } from '../dtos';
 import { OAuthTokenErrorCode, OAuthTokenException } from '../exceptions/oauth-token.exception';
 import { Application } from 'src/modules/access/entities';
 import { ApplicationClientAuthService } from 'src/modules/access/services';
@@ -22,28 +21,19 @@ import { UsersService } from 'src/modules/users/services';
 import { PkceService } from './pkce.service';
 import { buildSessionBySidKey, buildSessionClientsKey, SESSION_REDIS_KEY_PREFIX } from '../constants/session.constants';
 import {
-  ACCESS_TOKEN_TTL_SECONDS,
+  TOKEN_TTL_SECONDS,
   AUTH_CODE_KEY_PREFIX,
   AUTH_CODE_TTL_SECONDS,
   LOGOUT_TOKEN_TTL_SECONDS,
-  REFRESH_TOKEN_KEY_PREFIX,
-  USER_REFRESH_TOKENS_KEY_PREFIX,
 } from '../constants/oauth.constants';
 
-// Both grants validate and persist against the same Redis snapshot as session revocation.
-const VALIDATE_GRANT_SESSION_SCRIPT = `
+const COMPLETE_AUTHORIZATION_CODE_GRANT_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if not current or current ~= ARGV[1] then
   return 0
 end
 local credential = cjson.decode(current)
-local nextCredential = cjson.decode(ARGV[2])
-if credential.sid ~= nextCredential.sid or credential.userId ~= nextCredential.userId
-  or credential.credentialVersion ~= nextCredential.credentialVersion
-  or credential.clientId ~= nextCredential.clientId then
-  return 0
-end
-local sessionKey = redis.call('GET', KEYS[4])
+local sessionKey = redis.call('GET', KEYS[2])
 if not sessionKey or string.sub(sessionKey, 1, ${SESSION_REDIS_KEY_PREFIX.length}) ~= '${SESSION_REDIS_KEY_PREFIX}' then
   return 0
 end
@@ -55,44 +45,13 @@ if not ok or type(session) ~= 'table' or session.sid ~= credential.sid
   or session.credentialVersion ~= credential.credentialVersion then
   return 0
 end
-local ttl = math.min(redis.call('PTTL', sessionKey), redis.call('PTTL', KEYS[4]))
+local ttl = math.min(redis.call('PTTL', sessionKey), redis.call('PTTL', KEYS[2]))
 if ttl <= 0 then return 0 end
-local expiresAt = math.min(redis.call('PEXPIRETIME', sessionKey), redis.call('PEXPIRETIME', KEYS[4]))
-`;
-
-const COMPLETE_AUTHORIZATION_CODE_GRANT_SCRIPT = `
-${VALIDATE_GRANT_SESSION_SCRIPT}
+local expiresAt = math.min(redis.call('PEXPIRETIME', sessionKey), redis.call('PEXPIRETIME', KEYS[2]))
 redis.call('DEL', KEYS[1])
-redis.call('SET', KEYS[2], ARGV[2], 'PXAT', expiresAt)
-redis.call('SADD', KEYS[3], ARGV[3])
--- A shorter session must not shorten the index used by another session of this user.
-if redis.call('PEXPIRETIME', KEYS[3]) < expiresAt then
-  redis.call('PEXPIREAT', KEYS[3], expiresAt)
-end
-redis.call('SADD', KEYS[5], credential.clientId)
-redis.call('PEXPIREAT', KEYS[5], expiresAt)
-return ttl
-`;
-
-const ROTATE_REFRESH_TOKEN_SCRIPT = `
-${VALIDATE_GRANT_SESSION_SCRIPT}
-redis.call('DEL', KEYS[1])
-redis.call('SET', KEYS[2], ARGV[2], 'PXAT', expiresAt)
-redis.call('SREM', KEYS[3], ARGV[3])
-redis.call('SADD', KEYS[3], ARGV[4])
-if redis.call('PEXPIRETIME', KEYS[3]) < expiresAt then
-  redis.call('PEXPIREAT', KEYS[3], expiresAt)
-end
-return ttl
-`;
-
-const REVOKE_USER_REFRESH_TOKENS_SCRIPT = `
-local tokens = redis.call('SMEMBERS', KEYS[1])
-for _, token in ipairs(tokens) do
-  redis.call('DEL', ARGV[1] .. token)
-end
-redis.call('DEL', KEYS[1])
-return #tokens
+redis.call('SADD', KEYS[3], credential.clientId)
+redis.call('PEXPIREAT', KEYS[3], expiresAt)
+return 1
 `;
 
 @Injectable()
@@ -105,7 +64,7 @@ export class TokenService {
     private readonly pkceService: PkceService,
   ) {}
 
-  async handleTokenRequest(dto: TokenRequestDto, authentication: TokenClientAuthentication) {
+  async handleTokenRequest(dto: TokenRequestDto, authentication: TokenClientAuthentication): Promise<IssuedTokens> {
     if (authentication.clientId !== dto.clientId) {
       throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
     }
@@ -117,26 +76,17 @@ export class TokenService {
       if (error instanceof UnauthorizedException) throw new OAuthTokenException(OAuthTokenErrorCode.INVALID_CLIENT);
       throw error;
     }
-    return dto.grantType === GrantType.AUTHORIZATION_CODE
-      ? this.handleAuthorizationCodeGrant(dto, app)
-      : this.handleRefreshTokenGrant(dto, app);
+
+    return this.handleAuthorizationCodeGrant(dto, app);
   }
 
-  private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application) {
+  private async handleAuthorizationCodeGrant(dto: TokenRequestDto, app: Application): Promise<IssuedTokens> {
     const key = `${AUTH_CODE_KEY_PREFIX}${dto.code}`;
-
     const raw = await this.redis.get(key);
-
     if (!raw) throw new UnauthorizedException('Invalid or expired code.');
 
-    const context = this.parseCredential(raw) as AuthorizationCodePayload | null;
-    if (
-      !context ||
-      typeof context.redirectUri !== 'string' ||
-      typeof context.codeChallenge !== 'string' ||
-      context.codeChallengeMethod !== 'S256' ||
-      !Number.isFinite(context.createdAt)
-    ) {
+    const context = this.parseAuthorizationCode(raw);
+    if (!context) {
       throw new UnauthorizedException('Invalid or expired code.');
     }
 
@@ -144,81 +94,43 @@ export class TokenService {
       throw new UnauthorizedException('Invalid client.');
     }
 
-    // PKCE is mandatory for authorization_code and only S256 challenges are accepted.
     this.pkceService.verifyCodeVerifier(dto.codeVerifier, context.codeChallenge, context.codeChallengeMethod);
 
     const user = await this.usersService.findUserEligibleForOAuthCredentials(context.userId, app.id);
-    if (!user || !Number.isInteger(context.credentialVersion) || user.credentialVersion !== context.credentialVersion) {
+    if (!user || user.credentialVersion !== context.credentialVersion) {
       throw new UnauthorizedException('User no longer has access to this application.');
     }
 
-    const preparedTokenPair = await this.prepareTokenPair(
+    const tokens = await this.issueTokens(
       {
         sub: user.id,
         externalKey: user.externalKey,
         name: user.fullName,
         clientId: context.clientId,
         sid: context.sid,
+        scope: context.scope,
       },
-      user.credentialVersion,
+      {
+        sub: user.id,
+        externalKey: user.externalKey,
+        name: user.fullName,
+        sid: context.sid,
+        nonce: context.nonce,
+      },
     );
 
-    const completed = await this.completeAuthorizationCodeGrant(dto.code!, raw, preparedTokenPair);
-    if (completed <= 0) {
+    const completed = await this.completeAuthorizationCodeGrant(dto.code, raw, context);
+    if (!completed) {
       throw new UnauthorizedException('Invalid or expired code.');
     }
 
-    return { ...preparedTokenPair.tokens, refreshTokenExpiresIn: Math.floor(completed / 1000) };
-  }
-
-  private async handleRefreshTokenGrant(dto: TokenRequestDto, app: Application) {
-    if (!dto.refreshToken) {
-      throw new UnauthorizedException('refresh_token is required.');
-    }
-
-    const storedRefreshToken = await this.readRefreshToken(dto.refreshToken);
-    if (!storedRefreshToken) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
-
-    const data = storedRefreshToken.payload;
-
-    if (data.clientId !== app.clientId) {
-      throw new UnauthorizedException('invalid_client');
-    }
-
-    const user = await this.usersService.findUserEligibleForOAuthCredentials(data.userId, app.id);
-    if (!user) {
-      throw new UnauthorizedException('User no longer has access to this application.');
-    }
-
-    if (!Number.isInteger(data.credentialVersion) || data.credentialVersion !== user.credentialVersion) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
-
-    const preparedTokenPair = await this.prepareTokenPair(
-      {
-        sub: user.id,
-        name: user.fullName,
-        externalKey: user.externalKey,
-        clientId: data.clientId,
-        sid: data.sid,
-      },
-      user.credentialVersion,
-    );
-
-    const rotated = await this.rotateRefreshToken(dto.refreshToken, storedRefreshToken.raw, preparedTokenPair);
-    if (rotated <= 0) {
-      throw new UnauthorizedException('Invalid or expired refresh token.');
-    }
-
-    return { ...preparedTokenPair.tokens, refreshTokenExpiresIn: Math.floor(rotated / 1000) };
+    return tokens;
   }
 
   async createAuthorizationCode(
     { userId, credentialVersion, sid }: AuthSessionPayload,
-    { clientId, redirectUri, codeChallenge, codeChallengeMethod }: AuthorizeParamsDto,
-  ) {
+    { clientId, redirectUri, scope, nonce, codeChallenge, codeChallengeMethod }: AuthorizeParamsDto,
+  ): Promise<string> {
     const code = crypto.randomUUID();
     const key = `${AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthorizationCodePayload = {
@@ -227,9 +139,10 @@ export class TokenService {
       sid,
       clientId,
       redirectUri,
+      scope,
+      nonce,
       codeChallenge,
       codeChallengeMethod,
-      createdAt: Date.now(),
     };
     await this.redis.set(key, JSON.stringify(payload), 'EX', AUTH_CODE_TTL_SECONDS);
     return code;
@@ -252,108 +165,50 @@ export class TokenService {
     );
   }
 
-  private async prepareTokenPair(payload: AccessTokenPayload, credentialVersion: number): Promise<PreparedTokenPair> {
-    const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
-      audience: payload.clientId,
-    });
-
-    const refreshToken = crypto.randomUUID();
+  private async issueTokens(accessPayload: AccessTokenPayload, idPayload: IdTokenPayload): Promise<IssuedTokens> {
+    const [accessToken, idToken] = await Promise.all([
+      this.jwtService.signAsync(accessPayload, {
+        expiresIn: TOKEN_TTL_SECONDS,
+        audience: accessPayload.clientId,
+      }),
+      this.jwtService.signAsync(idPayload, {
+        expiresIn: TOKEN_TTL_SECONDS,
+        audience: accessPayload.clientId,
+        header: { alg: 'RS256', typ: 'JWT' },
+      }),
+    ]);
 
     return {
-      tokens: {
-        accessToken,
-        refreshToken,
-        accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
-        tokenType: 'Bearer',
-      },
-      refreshTokenPayload: {
-        userId: payload.sub,
-        sid: payload.sid,
-        clientId: payload.clientId,
-        credentialVersion,
-        scope: payload.scope,
-      },
+      accessToken,
+      idToken,
+      accessTokenExpiresIn: TOKEN_TTL_SECONDS,
+      tokenType: 'Bearer',
     };
   }
 
   private async completeAuthorizationCodeGrant(
     authorizationCode: string,
     expectedAuthorizationCodePayload: string,
-    preparedTokenPair: PreparedTokenPair,
-  ): Promise<number> {
-    const { tokens, refreshTokenPayload } = preparedTokenPair;
+    context: AuthorizationCodePayload,
+  ): Promise<boolean> {
     const result = await this.redis.eval(
       COMPLETE_AUTHORIZATION_CODE_GRANT_SCRIPT,
-      5,
+      3,
       `${AUTH_CODE_KEY_PREFIX}${authorizationCode}`,
-      this.buildRefreshTokenKey(tokens.refreshToken),
-      this.buildUserRefreshTokensKey(refreshTokenPayload.userId),
-      buildSessionBySidKey(refreshTokenPayload.sid),
-      buildSessionClientsKey(refreshTokenPayload.sid),
+      buildSessionBySidKey(context.sid),
+      buildSessionClientsKey(context.sid),
       expectedAuthorizationCodePayload,
-      JSON.stringify(refreshTokenPayload),
-      tokens.refreshToken,
     );
 
-    return Number(result);
+    return Number(result) === 1;
   }
 
-  private async readRefreshToken(refreshToken: string): Promise<StoredRefreshToken | null> {
-    const raw = await this.redis.get(this.buildRefreshTokenKey(refreshToken));
-    if (!raw) return null;
-
-    const payload = this.parseCredential(raw);
-    return payload ? { raw, payload } : null;
-  }
-
-  private async rotateRefreshToken(
-    refreshToken: string,
-    expectedRefreshTokenPayload: string,
-    preparedTokenPair: PreparedTokenPair,
-  ): Promise<number> {
-    const { tokens, refreshTokenPayload } = preparedTokenPair;
-    const result = await this.redis.eval(
-      ROTATE_REFRESH_TOKEN_SCRIPT,
-      4,
-      this.buildRefreshTokenKey(refreshToken),
-      this.buildRefreshTokenKey(tokens.refreshToken),
-      this.buildUserRefreshTokensKey(refreshTokenPayload.userId),
-      buildSessionBySidKey(refreshTokenPayload.sid),
-      expectedRefreshTokenPayload,
-      JSON.stringify(refreshTokenPayload),
-      refreshToken,
-      tokens.refreshToken,
-    );
-
-    return Number(result);
-  }
-
-  async revokeAllRefreshTokensForUser(userId: string): Promise<void> {
-    await this.redis.eval(
-      REVOKE_USER_REFRESH_TOKENS_SCRIPT,
-      1,
-      this.buildUserRefreshTokensKey(userId),
-      REFRESH_TOKEN_KEY_PREFIX,
-    );
-  }
-
-  private parseCredential(raw: string): RefreshTokenPayload | null {
+  private parseAuthorizationCode(raw: string): AuthorizationCodePayload | null {
     try {
       const value: unknown = JSON.parse(raw);
-      if (!isAuthSessionPayload(value)) return null;
-      const payload = value as RefreshTokenPayload;
-      return typeof payload.clientId === 'string' && payload.clientId.length > 0 ? payload : null;
+      return isAuthorizationCodePayload(value) ? value : null;
     } catch {
       return null;
     }
-  }
-
-  private buildRefreshTokenKey(refreshToken: string): string {
-    return `${REFRESH_TOKEN_KEY_PREFIX}${refreshToken}`;
-  }
-
-  private buildUserRefreshTokensKey(userId: string): string {
-    return `${USER_REFRESH_TOKENS_KEY_PREFIX}${userId}`;
   }
 }

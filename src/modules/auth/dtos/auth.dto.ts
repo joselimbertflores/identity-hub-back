@@ -1,5 +1,5 @@
 import { Expose } from 'class-transformer';
-import { Equals, IsEmpty, IsNotEmpty, IsOptional, IsString, IsUUID, IsUrl, Length, Matches } from 'class-validator';
+import { Equals, IsNotEmpty, IsOptional, IsString, IsUUID, IsUrl, Length, Matches } from 'class-validator';
 
 export class AuthorizeParamsDto {
   @IsString()
@@ -16,11 +16,15 @@ export class AuthorizeParamsDto {
   @IsString()
   @Equals('code', { message: 'response type must be "code"' })
   @Expose({ name: 'response_type' })
-  responseType: string;
+  responseType: 'code';
 
-  @IsOptional()
-  @IsEmpty({ message: 'scope is not supported' })
-  scope?: string;
+  @IsString()
+  @Equals('openid', { message: 'scope must be "openid"' })
+  scope: 'openid';
+
+  @IsString()
+  @IsNotEmpty()
+  nonce: string;
 
   @IsString()
   @IsNotEmpty()

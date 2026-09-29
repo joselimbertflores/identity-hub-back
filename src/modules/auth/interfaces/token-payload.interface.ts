@@ -1,34 +1,23 @@
-export class AccessTokenPayload {
+export interface AccessTokenPayload {
   sub: string;
   sid: string;
   externalKey: string;
   name: string;
   clientId: string;
-  scope?: string;
+  scope: 'openid';
 }
 
-export class RefreshTokenPayload {
-  userId: string;
+export interface IdTokenPayload {
+  sub: string;
   sid: string;
-  clientId: string;
-  credentialVersion: number;
-  scope?: string;
+  externalKey: string;
+  name: string;
+  nonce: string;
 }
 
-export interface IssuedTokenPair {
+export interface IssuedTokens {
   accessToken: string;
-  refreshToken: string;
+  idToken: string;
   accessTokenExpiresIn: number;
-  refreshTokenExpiresIn: number;
   tokenType: 'Bearer';
-}
-
-export interface PreparedTokenPair {
-  tokens: Omit<IssuedTokenPair, 'refreshTokenExpiresIn'>;
-  refreshTokenPayload: RefreshTokenPayload;
-}
-
-export interface StoredRefreshToken {
-  raw: string;
-  payload: RefreshTokenPayload;
 }

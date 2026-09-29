@@ -1,6 +1,6 @@
 # Identity Hub Backend
 
-Identity Hub centraliza la autenticación de usuarios y entrega credenciales OAuth a aplicaciones cliente. Mantiene la sesión SSO, controla qué usuarios pueden acceder a cada cliente y publica las claves necesarias para validar sus tokens.
+Identity Hub centraliza la autenticación de usuarios y entrega identidad mediante un perfil OIDC mínimo. Mantiene la sesión SSO, controla qué usuarios pueden acceder a cada cliente y publica las claves necesarias para validar sus tokens.
 
 La documentación se mantiene breve y separada del detalle de endpoints:
 
