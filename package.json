@@ -16,7 +16,6 @@
     "migration:generate": "npm run typeorm -- migration:generate",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
-    "bootstrap:run": "ts-node -r tsconfig-paths/register scripts/bootstrap.ts",
     "migration:import-seguimiento-users": "ts-node -r tsconfig-paths/register scripts/import-seguimiento-users.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",

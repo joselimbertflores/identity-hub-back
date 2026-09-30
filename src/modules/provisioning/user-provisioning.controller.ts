@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { RequiredRole } from '../auth/decorators';
 import { UserRole } from '../users/entities';
@@ -27,15 +27,5 @@ export class UserProvisioningController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: UpdateUserWithAccessDto) {
     return this.userProvisioningService.updateUserWithApplications(id, body);
-  }
-
-  @Post(':id/password-reset')
-  resetPassword(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userProvisioningService.resetPassword(id);
-  }
-
-  @Post(':id/password-action/resend')
-  resendPasswordAction(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userProvisioningService.resendPasswordAction(id);
   }
 }

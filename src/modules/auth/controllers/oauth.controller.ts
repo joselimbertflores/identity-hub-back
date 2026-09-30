@@ -63,10 +63,10 @@ export class OAuthController {
     const sameSite = this.configService.getOrThrow('IDENTITY_COOKIE_SAME_SITE', { infer: true });
 
     try {
-      const { sessionId, mustChangePassword } = await this.authService.signIn(body);
+      const { sessionId } = await this.authService.signIn(body);
       res.cookie(SESSION_COOKIE_NAME, sessionId, buildSessionCookieOptions(secure, sameSite));
 
-      const redirectUrl = await this.oauthService.resolvePostLoginRedirect(queryParams, sessionId, mustChangePassword);
+      const redirectUrl = await this.oauthService.resolvePostLoginRedirect(queryParams, sessionId);
       return res.redirect(redirectUrl);
     } catch (error: unknown) {
       if (error instanceof AuthException) {

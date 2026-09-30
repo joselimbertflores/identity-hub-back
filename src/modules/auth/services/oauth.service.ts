@@ -56,10 +56,6 @@ export class OAuthService {
     }
 
     const { session, user: sessionUser } = authenticatedSession;
-    if (sessionUser.mustChangePassword) {
-      const authRequestId = await this.createPendingAuthRequest(params, sessionId);
-      return this.buildPasswordChangeRedirectUrl(authRequestId);
-    }
 
     const user = await this.usersService.findUserEligibleForOAuthCredentials(sessionUser.id, app.id);
     if (!user || user.credentialVersion !== session.credentialVersion) {
@@ -77,16 +73,11 @@ export class OAuthService {
   async resolvePostLoginRedirect(
     { authRequestId }: LoginParamsDto,
     sessionId: string,
-    mustChangePassword: boolean,
   ): Promise<string> {
     const boundAuthRequestId =
       authRequestId && (await this.bindPendingAuthRequestToSession(authRequestId, sessionId))
         ? authRequestId
         : undefined;
-
-    if (mustChangePassword) {
-      return this.buildPasswordChangeRedirectUrl(boundAuthRequestId);
-    }
 
     return this.resumeAuthorizeFlow({ authRequestId: boundAuthRequestId }, sessionId);
   }
@@ -167,10 +158,6 @@ export class OAuthService {
       throw new Error('Invalid pending authorization request');
     }
     return parsed;
-  }
-
-  private buildPasswordChangeRedirectUrl(authRequestId?: string): string {
-    return this.buildIdentityHubUiUrl(IDENTITY_HUB_UI_PATHS.CHANGE_PASSWORD, { auth_request_id: authRequestId });
   }
 
   private buildIdentityHubUiUrl(path: string, params?: Record<string, string | undefined>): string {

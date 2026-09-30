@@ -19,7 +19,6 @@ import { OAUTH_JWT_KEY_ID } from './constants/oauth.constants';
 import { UsersModule } from '../users/users.module';
 import { AccessModule } from '../access/access.module';
 import { SessionGuard } from './guards/session.guard';
-import { PasswordChangeGuard } from './guards';
 import { EnvironmentVariables } from 'src/config/env.validation';
 import { PasswordActionToken } from './entities';
 import { MailModule } from '../mail';
@@ -37,10 +36,6 @@ import { MailModule } from '../mail';
     {
       provide: APP_GUARD,
       useClass: SessionGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: PasswordChangeGuard,
     },
   ],
   imports: [

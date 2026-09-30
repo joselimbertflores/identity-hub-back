@@ -8,4 +8,4 @@ La documentación se mantiene breve y separada del detalle de endpoints:
 - [Configuración de entorno](.env.template)
 - [Validación de configuración](src/config/env.validation.ts)
 
-Los scripts disponibles para build, migraciones, bootstrap y pruebas están definidos en [package.json](package.json).
+Los scripts disponibles para build, migraciones, importaciones controladas y pruebas están definidos en [package.json](package.json).

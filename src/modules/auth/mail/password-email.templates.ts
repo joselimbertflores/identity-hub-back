@@ -1,7 +1,6 @@
 import type { MailContent } from 'src/modules/mail';
 import type { User } from 'src/modules/users/entities';
 
-import { PasswordActionPurpose } from '../entities';
 import type { IssuedPasswordAction } from '../interfaces';
 
 const SYSTEM_NAME = 'Sistema de Identidad y Acceso Unificado';
@@ -13,18 +12,11 @@ export function buildPasswordActionEmail(
   { fullName, login }: Pick<User, 'fullName' | 'login'>,
   action: IssuedPasswordAction,
 ): MailContent {
-  const isInitialSetup = action.purpose === PasswordActionPurpose.INITIAL_SETUP;
-  const subject = isInitialSetup ? 'Configura tu acceso al SIAU' : 'Restablece tu contraseña del SIAU';
-  const introduction = isInitialSetup
-    ? `Tu acceso al ${SYSTEM_NAME} está disponible.`
-    : 'Recibimos una solicitud para restablecer la contraseña de tu cuenta.';
-  const actionInstruction = isInitialSetup
-    ? 'Configura tu contraseña mediante el siguiente enlace:'
-    : 'Restablece tu contraseña mediante el siguiente enlace:';
-  const buttonLabel = isInitialSetup ? 'Configurar contraseña' : 'Restablecer contraseña';
-  const ignoreMessage = isInitialSetup
-    ? 'Si no reconoces este mensaje, puedes ignorarlo.'
-    : 'Si no realizaste esta solicitud, puedes ignorar este correo.';
+  const subject = 'Establece una nueva contraseña del SIAU';
+  const introduction = `Puedes establecer una nueva contraseña para acceder al ${SYSTEM_NAME}.`;
+  const actionInstruction = 'Utiliza el siguiente enlace:';
+  const buttonLabel = 'Establecer contraseña';
+  const ignoreMessage = 'Si no esperabas este mensaje, puedes ignorarlo.';
   const expiresAt = formatBoliviaDate(action.expiresAt);
   const safeName = escapeHtml(fullName);
   const safeLogin = escapeHtml(login);

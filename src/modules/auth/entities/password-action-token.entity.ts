@@ -2,11 +2,6 @@ import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, Primary
 
 import { User } from 'src/modules/users/entities';
 
-export enum PasswordActionPurpose {
-  INITIAL_SETUP = 'INITIAL_SETUP',
-  PASSWORD_RESET = 'PASSWORD_RESET',
-}
-
 @Entity('password_action_tokens')
 @Index('uq_password_action_tokens_user', ['userId'], { unique: true })
 @Index('uq_password_action_tokens_hash', ['tokenHash'], { unique: true })
@@ -21,9 +16,6 @@ export class PasswordActionToken {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
-
-  @Column({ type: 'enum', enum: PasswordActionPurpose })
-  purpose: PasswordActionPurpose;
 
   @Column({ type: 'varchar', length: 64 })
   tokenHash: string;

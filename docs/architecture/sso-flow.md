@@ -30,7 +30,6 @@ Antes de emitir cada código, incluso con una sesión SSO existente, también co
 - usuario activo y versión de credenciales vigente;
 - aplicación activa;
 - `redirect_uri` registrada mediante coincidencia exacta;
-- cuenta sin `mustChangePassword`;
 - asignación vigente del usuario a la aplicación.
 
 Si no existe una sesión central válida, SIAU conserva temporalmente la solicitud completa, incluido el `nonce`, y conduce al login. El resultado vuelve al callback con el mismo `state`:

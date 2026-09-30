@@ -29,10 +29,10 @@ export class AuthService {
     private readonly mailService: MailService,
   ) {}
 
-  async signIn(dto: LoginDto): Promise<{ sessionId: string; mustChangePassword: boolean }> {
+  async signIn(dto: LoginDto): Promise<{ sessionId: string }> {
     const user = await this.authenticateUser(dto);
     const sessionId = await this.createAuthSession(user);
-    return { sessionId, mustChangePassword: user.mustChangePassword };
+    return { sessionId };
   }
 
   async completeAuthenticatedPasswordChange(
@@ -90,7 +90,6 @@ export class AuthService {
       id: user.id,
       fullName: user.fullName,
       roles: user.roles,
-      mustChangePassword: user.mustChangePassword,
     };
   }
 

@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
-import { Brackets, EntityManager, ILike, In, MoreThan, QueryFailedError, Repository } from 'typeorm';
+import { Brackets, EntityManager, ILike, QueryFailedError, Repository } from 'typeorm';
 import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { ulid } from 'ulid';
@@ -21,8 +20,6 @@ import { PasswordActionToken } from '../../auth/entities';
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly userRepository: Repository<User>,
-    @InjectRepository(PasswordActionToken)
-    private readonly passwordActionRepository: Repository<PasswordActionToken>,
   ) {}
 
   async findAll(paginationDto: PaginationParamsDto) {
@@ -46,22 +43,8 @@ export class UsersService {
       },
     });
 
-    const now = new Date();
-    const passwordActions = users.length
-      ? await this.passwordActionRepository.find({
-          where: { userId: In(users.map(({ id }) => id)), expiresAt: MoreThan(now) },
-          select: { userId: true, purpose: true, expiresAt: true },
-        })
-      : [];
-    const passwordActionByUserId = new Map(
-      passwordActions.map(({ userId, purpose, expiresAt }) => [userId, { purpose, expiresAt }]),
-    );
-
     return {
-      users: users.map((user) => ({
-        ...user,
-        passwordAction: passwordActionByUserId.get(user.id) ?? null,
-      })),
+      users,
       total,
     };
   }
@@ -104,7 +87,6 @@ export class UsersService {
       email,
       password: passwordHash,
       externalKey,
-      mustChangePassword: true,
       credentialVersion: 0,
     });
 
@@ -178,34 +160,8 @@ export class UsersService {
     }
   }
 
-  async prepareUnknownPasswordHash(): Promise<string> {
-    return this.encryptPassword(this.generateUnknownPassword());
-  }
-
-  async invalidateCredentialsForPasswordReset(
-    id: string,
-    passwordHash: string,
-    manager: EntityManager,
-  ): Promise<Pick<User, 'id' | 'email' | 'fullName' | 'login'>> {
-    const repository = manager.getRepository(User);
-    const user = await repository
-      .createQueryBuilder('user')
-      .addSelect('user.credentialVersion')
-      .setLock('pessimistic_write')
-      .where('user.id = :id', { id })
-      .getOne();
-
-    if (!user) throw new NotFoundException('User not found');
-    if (!user.isActive) {
-      throw new BadRequestException('Cannot reset the password of an inactive user');
-    }
-
-    user.password = passwordHash;
-    user.mustChangePassword = true;
-    user.credentialVersion += 1;
-    await repository.save(user);
-
-    return { id: user.id, email: user.email, fullName: user.fullName, login: user.login };
+  async createUnavailablePasswordHash(): Promise<string> {
+    return this.encryptPassword(randomBytes(32).toString('base64url'));
   }
 
   async applyAuthenticatedPasswordChange(
@@ -248,7 +204,6 @@ export class UsersService {
       }
 
       user.password = newPasswordHash;
-      user.mustChangePassword = false;
       user.credentialVersion += 1;
       await repository.save(user);
       await manager.getRepository(PasswordActionToken).delete({ userId: user.id });
@@ -278,10 +233,6 @@ export class UsersService {
     return await bcrypt.hash(password, 12);
   }
 
-  private generateUnknownPassword(): string {
-    return randomBytes(32).toString('base64url');
-  }
-
   private normalizeEmail(email: string | null | undefined): string | null | undefined {
     return typeof email === 'string' ? email.trim().toLowerCase() || null : email;
   }
@@ -299,7 +250,6 @@ export class UsersService {
       .innerJoin('user.applications', 'application')
       .where('user.id = :userId', { userId })
       .andWhere('user.isActive = true')
-      .andWhere('user.mustChangePassword = false')
       .andWhere('application.id = :applicationId', { applicationId })
       .andWhere('application.isActive = true')
       .getOne();

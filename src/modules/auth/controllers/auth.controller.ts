@@ -4,7 +4,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
 import type { Response } from 'express';
 
-import { AllowPasswordChange, Cookies, GetAuthUser, Public } from '../decorators';
+import { Cookies, GetAuthUser, Public } from '../decorators';
 import { EnvironmentVariables } from 'src/config';
 import type { AuthUser } from '../interfaces';
 import { ChangePasswordDto, CompletePasswordActionDto, ForgotPasswordDto, LoginParamsDto } from '../dtos';
@@ -25,24 +25,17 @@ export class AuthController {
     private readonly passwordActionService: PasswordActionService,
   ) {}
 
-  @AllowPasswordChange()
   @Get('status')
   checkAuthStatus(@GetAuthUser() user: AuthUser) {
     return { user };
   }
 
-  @AllowPasswordChange()
   @Get('oauth/resume')
   async resumeOAuth(
-    @GetAuthUser() user: AuthUser,
     @Query() queryParams: LoginParamsDto,
     @Cookies(SESSION_COOKIE_NAME) sessionId: string,
   ) {
-    const redirectUrl = await this.oauthService.resolvePostLoginRedirect(
-      queryParams,
-      sessionId,
-      user.mustChangePassword,
-    );
+    const redirectUrl = await this.oauthService.resolvePostLoginRedirect(queryParams, sessionId);
     return { redirectUrl };
   }
 
@@ -62,7 +55,6 @@ export class AuthController {
     };
   }
 
-  @AllowPasswordChange()
   @Patch('change-password')
   async changePassword(
     @GetAuthUser('id') userId: string,

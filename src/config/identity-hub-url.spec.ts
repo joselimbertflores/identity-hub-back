@@ -5,25 +5,25 @@ import { getIdentityHubFrontendUrl } from './identity-hub-url';
 
 describe('Identity Hub URL configuration', () => {
   const createConfigService = (uiUrl?: string) => {
-    return {
-      get: jest.fn().mockReturnValue(uiUrl),
-      getOrThrow: jest.fn().mockReturnValue('https://siau.example'),
-    } as unknown as ConfigService<EnvironmentVariables, true>;
+    const get = jest.fn().mockReturnValue(uiUrl);
+    const getOrThrow = jest.fn().mockReturnValue('https://siau.example');
+    const service = { get, getOrThrow } as unknown as ConfigService<EnvironmentVariables, true>;
+    return { service, get, getOrThrow };
   };
 
   it('uses the optional UI URL override when configured', () => {
-    const configService = createConfigService('http://localhost:4200');
+    const { service, get, getOrThrow } = createConfigService('http://localhost:4200');
 
-    expect(getIdentityHubFrontendUrl(configService)).toBe('http://localhost:4200');
-    expect(configService.get).toHaveBeenCalledWith('IDENTITY_HUB_UI_URL', { infer: true });
-    expect(configService.getOrThrow).not.toHaveBeenCalled();
+    expect(getIdentityHubFrontendUrl(service)).toBe('http://localhost:4200');
+    expect(get).toHaveBeenCalledWith('IDENTITY_HUB_UI_URL', { infer: true });
+    expect(getOrThrow).not.toHaveBeenCalled();
   });
 
   it('falls back to the required public URL when the UI URL is omitted', () => {
-    const configService = createConfigService();
+    const { service, getOrThrow } = createConfigService();
 
-    expect(getIdentityHubFrontendUrl(configService)).toBe('https://siau.example');
-    expect(configService.getOrThrow).toHaveBeenCalledWith('IDENTITY_HUB_PUBLIC_URL', {
+    expect(getIdentityHubFrontendUrl(service)).toBe('https://siau.example');
+    expect(getOrThrow).toHaveBeenCalledWith('IDENTITY_HUB_PUBLIC_URL', {
       infer: true,
     });
   });

@@ -19,8 +19,7 @@ export interface EnvironmentVariables {
   RRHH_ACCESS_TOKEN?: string;
   JWT_PRIVATE_KEY_PATH: string;
   JWT_PUBLIC_KEY_PATH: string;
-  PASSWORD_INITIAL_SETUP_TTL_SECONDS: number;
-  PASSWORD_RESET_TTL_SECONDS: number;
+  PASSWORD_ACTION_TTL_SECONDS: number;
   SMTP_HOST: string;
   SMTP_PORT: number;
   SMTP_SECURE: boolean;
@@ -30,9 +29,6 @@ export interface EnvironmentVariables {
   SMTP_FROM_NAME: string;
   IDENTITY_COOKIE_SECURE: boolean;
   IDENTITY_COOKIE_SAME_SITE: IdentityCookieSameSite;
-  BOOTSTRAP_ADMIN_LOGIN?: string;
-  BOOTSTRAP_ADMIN_PASSWORD?: string;
-  BOOTSTRAP_ADMIN_FULL_NAME?: string;
 }
 
 const portSchema = Joi.number().integer().min(1).max(65535);
@@ -58,11 +54,7 @@ export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables>
   RRHH_ACCESS_TOKEN: Joi.string().trim().min(1).optional(),
   JWT_PRIVATE_KEY_PATH: Joi.string().min(1).required(),
   JWT_PUBLIC_KEY_PATH: Joi.string().min(1).required(),
-  PASSWORD_INITIAL_SETUP_TTL_SECONDS: Joi.number()
-    .integer()
-    .positive()
-    .default(24 * 60 * 60),
-  PASSWORD_RESET_TTL_SECONDS: Joi.number()
+  PASSWORD_ACTION_TTL_SECONDS: Joi.number()
     .integer()
     .positive()
     .default(60 * 60),
@@ -78,9 +70,6 @@ export const environmentValidationSchema: Joi.ObjectSchema<EnvironmentVariables>
     .valid('lax', 'strict', 'none')
     .when('IDENTITY_COOKIE_SECURE', { is: false, then: Joi.invalid('none') })
     .required(),
-  BOOTSTRAP_ADMIN_LOGIN: Joi.string().trim().min(1).optional(),
-  BOOTSTRAP_ADMIN_PASSWORD: Joi.string().min(1).optional(),
-  BOOTSTRAP_ADMIN_FULL_NAME: Joi.string().trim().min(1).optional(),
 })
   .and('SMTP_USERNAME', 'SMTP_PASSWORD')
   .and('RRHH_INTERNAL_URL', 'RRHH_ACCESS_TOKEN');

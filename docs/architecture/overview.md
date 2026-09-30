@@ -13,7 +13,7 @@ SIAU:
 - emite `id_token` y `access_token` JWT firmados con RS256;
 - publica el JWKS para validar ID Tokens, access tokens y Logout Tokens;
 - mantiene la sesión SSO y coordina Single Logout por `sid`;
-- gestiona activación inicial, cambio y recuperación de contraseña;
+- gestiona el establecimiento, cambio y recuperación de contraseña;
 - integra fuentes institucionales de identidad detrás de su propio backend.
 
 SIAU no emite refresh tokens. Cada aplicación cliente establece y mantiene una sesión local server-side después de validar el `id_token`. El access token sigue formando parte de la respuesta OAuth/OIDC, pero no es la credencial con la que estos clientes mantienen esa sesión.
@@ -44,7 +44,7 @@ Los identificadores tienen responsabilidades diferentes:
 
 Las altas administrativas verifican la identidad contra la fuente institucional desde el backend. Los procesos controlados de importación son independientes de las altas nuevas.
 
-Antes de emitir cada authorization code, incluso al reutilizar SSO, SIAU exige que el usuario y la aplicación estén activos, que la cuenta no requiera cambio de contraseña y que el usuario continúe asignado a la aplicación. El endpoint server-to-server `/internal/users/assignable` aplica la misma asignación para preparar vinculaciones por `externalKey`.
+Antes de emitir cada authorization code, incluso al reutilizar SSO, SIAU exige que el usuario y la aplicación estén activos y que el usuario continúe asignado a la aplicación. El endpoint server-to-server `/internal/users/assignable` aplica la misma asignación para preparar vinculaciones por `externalKey`.
 
 ## Aplicaciones cliente
 
@@ -62,7 +62,9 @@ El secreto se devuelve al crear o regenerar la aplicación y se persiste únicam
 
 La sesión central contiene la identidad del usuario, su versión de credenciales y un `sid`. Los clientes se registran como participantes únicamente cuando completan el canje del authorization code.
 
-`credentialVersion` invalida sesiones y códigos emitidos antes del último cambio de credenciales. Desactivar una cuenta, cambiar o restablecer su contraseña revoca sus sesiones centrales; antes de eliminarlas SIAU conserva los `sid` y clientes participantes para enviar Back-Channel Logout. Reactivar la cuenta no restaura sesiones anteriores.
+`credentialVersion` invalida sesiones y códigos emitidos antes del último cambio real de credenciales. Desactivar una cuenta o establecer una nueva contraseña incrementa esa versión y revoca sus sesiones centrales; antes de eliminarlas SIAU conserva los `sid` y clientes participantes para enviar Back-Channel Logout. Reactivar la cuenta no restaura sesiones anteriores.
+
+La creación y recuperación usan el mismo enlace temporal para establecer una contraseña. Solicitar recuperación no invalida la contraseña ni las sesiones actuales; esos efectos ocurren únicamente cuando el enlace se consume correctamente. Desactivar la cuenta o cambiar su correo elimina cualquier enlace pendiente. El detalle está en [Contraseñas](passwords.md).
 
 Los eventos cubiertos son:
 

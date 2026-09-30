@@ -9,7 +9,7 @@ import { EnvironmentVariables, getIdentityHubFrontendUrl } from 'src/config';
 import { User } from 'src/modules/users/entities';
 import { IDENTITY_HUB_UI_PATHS } from '../constants/oauth.constants';
 import { CompletePasswordActionDto } from '../dtos';
-import { PasswordActionPurpose, PasswordActionToken } from '../entities';
+import { PasswordActionToken } from '../entities';
 import type { IssuedPasswordAction, PasswordActionDelivery } from '../interfaces';
 import { buildPasswordActionEmail, buildPasswordChangedEmail } from '../mail/password-email.templates';
 import { MailService } from 'src/modules/mail';
@@ -31,31 +31,13 @@ export class PasswordActionService {
     private readonly mailService: MailService,
   ) {}
 
-  async issue(userId: string, purpose: PasswordActionPurpose, manager: EntityManager): Promise<IssuedPasswordAction> {
-    const user = await this.lockUser(userId, manager);
-    this.requireEmail(user);
-    return this.replaceAction(userId, purpose, manager);
-  }
-
-  async resendPasswordAction(userId: string, manager: EntityManager): Promise<IssuedPasswordAction> {
+  async issueOrReplace(userId: string, manager: EntityManager): Promise<IssuedPasswordAction> {
     const user = await this.lockUser(userId, manager);
     if (!user.isActive) {
-      throw new BadRequestException('Cannot resend a password action for an inactive user');
+      throw new BadRequestException('Cannot issue a password action for an inactive user');
     }
     this.requireEmail(user);
-
-    const repository = manager.getRepository(PasswordActionToken);
-    const current = await repository
-      .createQueryBuilder('action')
-      .setLock('pessimistic_write')
-      .where('action.userId = :userId', { userId })
-      .getOne();
-
-    if (!current || current.expiresAt.getTime() <= Date.now()) {
-      throw new NotFoundException('No pending password action found');
-    }
-
-    return this.replaceAction(userId, current.purpose, manager);
+    return this.replaceAction(userId, manager);
   }
 
   async requestRecovery(identifier: string): Promise<void> {
@@ -79,7 +61,7 @@ export class PasswordActionService {
       if (users.length !== 1) return null;
       const [user] = users;
 
-      const action = await this.issue(user.id, PasswordActionPurpose.PASSWORD_RESET, manager);
+      const action = await this.issueOrReplace(user.id, manager);
       return { user, action };
     });
 
@@ -117,7 +99,7 @@ export class PasswordActionService {
     const tokenHash = this.hashCode(normalizedCode);
     await this.removeExpiredActions();
     const candidate = await this.dataSource.getRepository(PasswordActionToken).findOne({ where: { tokenHash } });
-    if (!candidate || candidate.expiresAt.getTime() <= Date.now() || !this.isSupportedPurpose(candidate.purpose)) {
+    if (!candidate || candidate.expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException(INVALID_ACTION_MESSAGE);
     }
 
@@ -142,11 +124,7 @@ export class PasswordActionService {
 
       if (!action) return null;
 
-      if (
-        action.tokenHash !== tokenHash ||
-        action.purpose !== candidate.purpose ||
-        !this.isSupportedPurpose(action.purpose)
-      ) {
+      if (action.tokenHash !== tokenHash) {
         return null;
       }
 
@@ -161,7 +139,6 @@ export class PasswordActionService {
       }
 
       user.password = newPasswordHash;
-      user.mustChangePassword = false;
       user.credentialVersion += 1;
       await manager.getRepository(User).save(user);
       await actionRepository.delete({ userId: user.id });
@@ -186,28 +163,23 @@ export class PasswordActionService {
     return { message: 'Password updated successfully. Sign in with your new password.' };
   }
 
-  private async replaceAction(
-    userId: string,
-    purpose: PasswordActionPurpose,
-    manager: EntityManager,
-  ): Promise<IssuedPasswordAction> {
+  private async replaceAction(userId: string, manager: EntityManager): Promise<IssuedPasswordAction> {
     const code = this.generateCode();
     const normalizedCode = this.normalizeCode(code)!;
-    const expiresAt = new Date(Date.now() + this.getTtlSeconds(purpose) * 1000);
+    const ttlSeconds = this.configService.getOrThrow('PASSWORD_ACTION_TTL_SECONDS', { infer: true });
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
     const repository = manager.getRepository(PasswordActionToken);
 
     await repository.delete({ userId });
     await repository.save(
       repository.create({
         userId,
-        purpose,
         tokenHash: this.hashCode(normalizedCode),
         expiresAt,
       }),
     );
 
     return {
-      purpose,
       code,
       actionUrl: this.buildActionUrl(code),
       expiresAt,
@@ -260,16 +232,6 @@ export class PasswordActionService {
 
   private hashCode(normalizedCode: string): string {
     return createHash('sha256').update(normalizedCode, 'utf8').digest('hex');
-  }
-
-  private isSupportedPurpose(purpose: PasswordActionPurpose): boolean {
-    return purpose === PasswordActionPurpose.INITIAL_SETUP || purpose === PasswordActionPurpose.PASSWORD_RESET;
-  }
-
-  private getTtlSeconds(purpose: PasswordActionPurpose): number {
-    return purpose === PasswordActionPurpose.INITIAL_SETUP
-      ? this.configService.getOrThrow('PASSWORD_INITIAL_SETUP_TTL_SECONDS', { infer: true })
-      : this.configService.getOrThrow('PASSWORD_RESET_TTL_SECONDS', { infer: true });
   }
 
   private buildActionUrl(code: string): string {

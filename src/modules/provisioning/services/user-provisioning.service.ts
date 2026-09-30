@@ -5,7 +5,6 @@ import { DataSource, EntityManager } from 'typeorm';
 import { CreateAdministrativeUserDto, CreateUserWithAccessDto, UpdateUserWithAccessDto } from '../dtos';
 import { UserApplicationsService } from '../../access/services';
 import { UsersService } from '../../users/services/users.service';
-import { PasswordActionPurpose } from '../../auth/entities';
 import { AuthService, PasswordActionService } from '../../auth/services';
 import { RrhhEmployeesService } from './rrhh-employees.service';
 
@@ -22,7 +21,7 @@ export class UserProvisioningService {
 
   async provisionUserWithApplications(dto: CreateAdministrativeUserDto) {
     const employee = await this.rrhhEmployeesService.findOne(dto.relationKey);
-    const passwordHash = await this.usersService.prepareUnknownPasswordHash();
+    const passwordHash = await this.usersService.createUnavailablePasswordHash();
     const result = await this.dataSource.transaction(async (manager) => {
       await this.usersService.ensureRelationKeyAvailable(employee.relationKey, manager);
       const user = await this.createProvisionedUser(
@@ -38,7 +37,7 @@ export class UserProvisioningService {
         passwordHash,
         manager,
       );
-      const action = await this.passwordActionService.issue(user.id, PasswordActionPurpose.INITIAL_SETUP, manager);
+      const action = await this.passwordActionService.issueOrReplace(user.id, manager);
       return { user, action };
     });
     const passwordAction = await this.passwordActionService.deliver(result.user, result.action);
@@ -47,7 +46,7 @@ export class UserProvisioningService {
   }
 
   async provisionUserWithApplicationsWithoutNotification(dto: CreateUserWithAccessDto) {
-    const passwordHash = await this.usersService.prepareUnknownPasswordHash();
+    const passwordHash = await this.usersService.createUnavailablePasswordHash();
     const user = await this.dataSource.transaction((manager) => this.createProvisionedUser(dto, passwordHash, manager));
     return { user };
   }
@@ -82,36 +81,5 @@ export class UserProvisioningService {
     }
 
     return { user: result.user };
-  }
-
-  async resetPassword(id: string) {
-    const passwordHash = await this.usersService.prepareUnknownPasswordHash();
-    const result = await this.dataSource.transaction(async (manager) => {
-      const user = await this.usersService.invalidateCredentialsForPasswordReset(id, passwordHash, manager);
-      const action = await this.passwordActionService.issue(user.id, PasswordActionPurpose.PASSWORD_RESET, manager);
-      return { user, action };
-    });
-
-    await this.authService.revokeAllUserSessions(result.user.id);
-    const passwordAction = await this.passwordActionService.deliver(result.user, result.action);
-
-    return {
-      message: 'Password reset created successfully',
-      passwordAction,
-    };
-  }
-
-  async resendPasswordAction(id: string) {
-    const result = await this.dataSource.transaction(async (manager) => {
-      const action = await this.passwordActionService.resendPasswordAction(id, manager);
-      const user = await this.usersService.findOneWithApplications(id, manager);
-      return { user, action };
-    });
-
-    const passwordAction = await this.passwordActionService.deliver(result.user, result.action);
-    return {
-      message: 'Password action resent successfully',
-      passwordAction,
-    };
   }
 }
