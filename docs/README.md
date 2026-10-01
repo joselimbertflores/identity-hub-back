@@ -4,9 +4,8 @@ SIAU (Sistema de Identidad y Acceso Unificado) centraliza la identidad y el acce
 
 Lectura recomendada:
 
-1. [Visión general](architecture/overview.md): propósito, límites, componentes y decisiones que forman parte del contrato.
-2. [Flujo SSO y OIDC](architecture/sso-flow.md): sesión central, autorización, tokens, reutilización de sesión y logout.
-3. [Integración de clientes](architecture/client-integration.md): registro de una aplicación y responsabilidades de su backend.
-4. [Contraseñas](architecture/passwords.md): alta, recuperación, cambio voluntario e invalidación de credenciales.
+1. [Visión general](architecture/overview.md): propósito, límites, componentes, identidad y modelo de contraseñas.
+2. [Flujo SSO y OIDC](architecture/sso-flow.md): protocolo, sesión central, autorización, tokens y Single Logout.
+3. [Integración de clientes](architecture/client-integration.md): guía autocontenida para registrar e integrar una aplicación.
 
 La configuración completa vive en [`.env.template`](../.env.template). Los endpoints y DTO actuales deben consultarse en [`src/modules`](../src/modules); esta documentación explica solo el comportamiento que los clientes y mantenedores necesitan conservar.

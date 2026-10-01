@@ -1,6 +1,6 @@
 # SSO, OIDC y Single Logout
 
-Este documento describe el contrato técnico entre SIAU y sus aplicaciones cliente. Las obligaciones del integrador están resumidas en [Integración de una aplicación cliente](client-integration.md).
+Este documento explica el protocolo y el estado que SIAU mantiene durante SSO y Single Logout. Los ejemplos de peticiones y las instrucciones completas para implementarlo en un cliente están en [Integración de una aplicación cliente](client-integration.md).
 
 ## Sesión central y sesión local
 
@@ -10,13 +10,11 @@ SIAU mantiene una sesión central server-side en su dominio. Cada aplicación ma
 - `sid` correlaciona esa sesión con las sesiones locales participantes; no autentica por sí solo.
 - Reutilizar SSO evita pedir credenciales de nuevo, pero no extiende la expiración absoluta de la sesión central.
 
+La cookie central es `HttpOnly`; sus opciones `Secure` y `SameSite` dependen del ambiente. El issuer (`iss`) es exactamente `IDENTITY_HUB_PUBLIC_URL`. `IDENTITY_HUB_UI_URL` permite servir la UI en otro origen y habilita CORS con credenciales solo para ese origen.
+
 ## Authorization Code con PKCE y OpenID Connect
 
-Por cada intento de inicio, el cliente genera y guarda server-side un `state`, un `nonce` y un `code_verifier`. Inicia la autorización con:
-
-```http
-GET /oauth/authorize?response_type=code&client_id=<clientId>&redirect_uri=<uri>&scope=openid&state=<state>&nonce=<nonce>&code_challenge=<challenge>&code_challenge_method=S256
-```
+El cliente inicia `/oauth/authorize` con un `state`, un `nonce` y un challenge PKCE nuevos por intento. `state` correlaciona el callback, `nonce` vincula el ID Token con la autorización y PKCE vincula el canje con quien inició la solicitud.
 
 SIAU valida la forma de los parámetros y exige exactamente:
 
@@ -43,30 +41,11 @@ El authorization code guarda de forma temporal `clientId`, `redirectUri`, `scope
 
 ## Canje y tokens
 
-Un cliente confidencial canjea el código desde su backend:
-
-```http
-POST /oauth/token
-Content-Type: application/x-www-form-urlencoded
-Authorization: Basic <base64(formEncode(clientId):formEncode(clientSecret))>
-
-grant_type=authorization_code&code=<code>&redirect_uri=<uri>&code_verifier=<verifier>
-```
+Un cliente confidencial canjea el código desde su backend en `/oauth/token`, autenticado mediante HTTP Basic y presentando la misma `redirect_uri` y el `code_verifier` original.
 
 SIAU vuelve a comprobar cliente activo, usuario elegible, asignación, versión de credenciales, sesión central, URI exacta y PKCE. Consumir el código, comprobar la sesión por `sid` y registrar al cliente participante es una operación atómica. El código es de un solo uso.
 
-La respuesta exitosa es:
-
-```json
-{
-  "access_token": "<jwt>",
-  "id_token": "<jwt>",
-  "token_type": "Bearer",
-  "expires_in": 600
-}
-```
-
-No se emite refresh token y `grant_type=refresh_token` no está soportado.
+La respuesta incluye `access_token`, `id_token`, `token_type=Bearer` y `expires_in`. No se emite refresh token y `grant_type=refresh_token` no está soportado.
 
 El `id_token` usa RS256 y contiene únicamente los claims de identidad y protocolo requeridos:
 
@@ -88,7 +67,7 @@ name
 - `externalKey` es el vínculo institucional para el usuario local.
 - `sid` correlaciona la sesión local con Single Logout.
 
-El JWKS se publica en `GET /.well-known/jwks.json`. El access token también está firmado con RS256 y se entrega como parte normal de OAuth, pero este perfil no lo usa para sostener la sesión local.
+El JWKS se publica en `GET /.well-known/jwks.json` con `kid=main-key`; ID Tokens, access tokens y Logout Tokens usan el mismo par RSA. El access token se entrega como parte normal de OAuth, pero este perfil no lo usa para sostener la sesión local.
 
 ## Reutilización de SSO
 
@@ -113,25 +92,11 @@ sequenceDiagram
 
 ## Revocación y Single Logout
 
-SIAU conserva los clientes participantes por `sid`. Un cliente participante puede iniciar cierre central desde su backend:
+SIAU conserva los clientes participantes por `sid`, registrados al completar el canje del código. El cierre central puede iniciarse en SIAU o desde el backend de un cliente participante mediante `/internal/sessions/logout`, autenticado con HTTP Basic e indicando el `sid`.
 
-```http
-POST /internal/sessions/logout
-Authorization: Basic <credenciales del cliente>
-Content-Type: application/json
+También disparan revocación la desactivación del usuario, los cambios de credenciales y el retiro de una asignación. Al revocar una sesión completa se conserva la información necesaria para notificar a todos sus participantes; al retirar una asignación se notifica únicamente al cliente afectado. El modelo de contraseñas e invalidación se describe en [Visión general](overview.md#contraseñas-e-invalidación).
 
-{ "sid": "<uuid>" }
-```
-
-También disparan revocación la desactivación del usuario, los cambios de credenciales y el retiro de una asignación. Al revocar una sesión completa se notifica a todos sus participantes; al retirar una asignación se notifica únicamente al cliente afectado.
-
-Cada `backchannelLogoutUri` recibe:
-
-```text
-Content-Type: application/x-www-form-urlencoded
-
-logout_token=<JWT>
-```
+Cada `backchannelLogoutUri` recibe un `POST` de formulario con `logout_token`.
 
 El Logout Token usa RS256, header `typ: logout+jwt` y contiene `iss`, `aud`, `iat`, `exp`, `jti`, `sid` y el evento estándar:
 
