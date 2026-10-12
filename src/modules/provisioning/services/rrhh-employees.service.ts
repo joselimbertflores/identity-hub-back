@@ -15,6 +15,9 @@ const RRHH_TIMEOUT_MS = 10_000;
 export interface RrhhEmployee {
   relationKey: string;
   fullName: string;
+  firstName?: string | null;
+  paternalLastName?: string | null;
+  maternalLastName?: string | null;
   position: string | null;
   unit: string | null;
   area: string | null;
@@ -121,6 +124,9 @@ export class RrhhEmployeesService {
     return {
       relationKey: value.relationKey,
       fullName: value.fullName,
+      firstName: this.nullableString(value.firstName),
+      paternalLastName: this.nullableString(value.paternalLastName),
+      maternalLastName: this.nullableString(value.maternalLastName),
       position: this.nullableString(value.position),
       unit: this.nullableString(value.unit),
       area: this.nullableString(value.area),

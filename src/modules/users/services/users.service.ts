@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { Brackets, EntityManager, ILike, QueryFailedError, Repository } from 'typeorm';
@@ -18,9 +13,7 @@ import { PasswordActionToken } from '../../auth/entities';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
-  ) {}
+  constructor(@InjectRepository(User) private readonly userRepository: Repository<User>) {}
 
   async findAll(paginationDto: PaginationParamsDto) {
     const { limit, offset, term } = paginationDto;
