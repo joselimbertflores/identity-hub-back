@@ -1,12 +1,12 @@
 import { config } from 'dotenv';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { NestFactory } from '@nestjs/core';
 import { getRedisConnectionToken } from '@nestjs-modules/ioredis';
 import { isEmail } from 'class-validator';
 import Redis from 'ioredis';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 
 import { AppModule } from '../src/app.module';
 import { Application } from '../src/modules/access/entities';
@@ -14,8 +14,6 @@ import { UserApplicationsService } from '../src/modules/access/services';
 import { UserProvisioningService } from '../src/modules/provisioning/services';
 import { User } from '../src/modules/users/entities';
 import { UsersService } from '../src/modules/users/services';
-
-config();
 
 const APPLICATION_CLIENT_ID = 'seg-tramites';
 const INPUT_PATH = resolve(process.cwd(), 'migration-data/seguimiento-identity-users.json');
@@ -29,6 +27,8 @@ interface Candidate {
   email: string | null;
   fullName: string;
   relationKey: string;
+  passwordHash?: string | null;
+  updatedPassword?: boolean;
 }
 
 interface Unresolved {
@@ -118,9 +118,17 @@ function parseRelationKey(value: string, field: string): { ci: string; extension
   return { ci, extension, normalized: extension ? `${ci}-${extension}` : ci };
 }
 
-function parseInput(raw: string): MigrationInput {
-  const parsed = JSON.parse(raw) as Partial<MigrationInput>;
-  if (!Array.isArray(parsed.candidates)) {
+const BCRYPT_HASH = /^\$2[ab]\$(?:0[4-9]|[12]\d|3[01])\$[./A-Za-z0-9]{53}$/;
+
+export function parseInput(raw: string): MigrationInput {
+  let parsed: Partial<MigrationInput> | null;
+  try {
+    parsed = JSON.parse(raw) as Partial<MigrationInput> | null;
+  } catch {
+    // SyntaxError messages can quote the JSON, including password hashes.
+    throw new Error('Invalid migration JSON');
+  }
+  if (!parsed || !Array.isArray(parsed.candidates)) {
     throw new Error('Input must contain a candidates array');
   }
   if (parsed.unresolved !== undefined && !Array.isArray(parsed.unresolved)) {
@@ -131,6 +139,16 @@ function parseInput(raw: string): MigrationInput {
     if (!candidate || typeof candidate !== 'object') {
       throw new Error(`Invalid candidate at index ${index}`);
     }
+    if (candidate.updatedPassword !== undefined && typeof candidate.updatedPassword !== 'boolean') {
+      throw new Error(`Invalid candidates[${index}].updatedPassword`);
+    }
+    if (
+      candidate.passwordHash !== undefined &&
+      candidate.passwordHash !== null &&
+      (typeof candidate.passwordHash !== 'string' || !BCRYPT_HASH.test(candidate.passwordHash))
+    ) {
+      throw new Error(`Invalid candidates[${index}].passwordHash`);
+    }
 
     return {
       userId: requireNonEmptyString(candidate.userId, `candidates[${index}].userId`),
@@ -139,6 +157,8 @@ function parseInput(raw: string): MigrationInput {
       email: normalizeOptionalEmail(candidate.email, `candidates[${index}].email`),
       fullName: requireNonEmptyString(candidate.fullName, `candidates[${index}].fullName`).trim(),
       relationKey: requireNonEmptyString(candidate.relationKey, `candidates[${index}].relationKey`).trim(),
+      passwordHash: candidate.updatedPassword === true ? (candidate.passwordHash ?? null) : null,
+      updatedPassword: candidate.updatedPassword === true,
     };
   });
 
@@ -270,7 +290,7 @@ async function addApplicationWithoutRemovingOthers(
   });
 }
 
-async function processCandidate(
+export async function processCandidate(
   candidate: Candidate,
   apply: boolean,
   application: Application,
@@ -326,30 +346,49 @@ async function processCandidate(
         application.id,
       )
     : (
-        await userProvisioningService.provisionUserWithApplicationsWithoutNotification({
-          fullName: employee.fullName,
-          login: candidate.login!,
-          relationKey: employee.relationKey,
-          email,
-          applicationIds: [application.id],
-        })
+        await userProvisioningService.provisionUserWithApplicationsWithoutNotification(
+          {
+            fullName: employee.fullName,
+            login: candidate.login!,
+            relationKey: employee.relationKey,
+            email,
+            applicationIds: [application.id],
+          },
+          candidate.passwordHash ?? undefined,
+        )
       ).user;
 
   return { userId: candidate.userId, externalKey: user.externalKey, relationKey: employee.relationKey };
 }
 
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await rename(temporaryPath, path);
+export async function writeJson(path: string, value: unknown): Promise<void> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700);
+  const temporaryDirectory = await mkdtemp(resolve(directory, '.identity-import-'));
+  try {
+    const temporaryPath = resolve(temporaryDirectory, 'data.json');
+    await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    await rename(temporaryPath, path);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
 }
 
 async function main(): Promise<void> {
+  process.umask(0o077);
+  config();
   const mode = getMode();
   getRequiredEnv('RRHH_INTERNAL_URL');
   getRequiredEnv('RRHH_ACCESS_TOKEN');
 
+  // Also protect exports copied into an already-existing destination file.
+  await chmod(dirname(INPUT_PATH), 0o700);
+  await chmod(INPUT_PATH, 0o600);
   const input = parseInput(await readFile(INPUT_PATH, 'utf8'));
   const context = await NestFactory.createApplicationContext(AppModule, { logger: false });
 
@@ -420,7 +459,16 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+export function migrationErrorMessage(error: unknown): string {
+  if (!(error instanceof Error) || error instanceof QueryFailedError) {
+    return 'Identity import failed; check database access and constraints (database details omitted).';
+  }
+  return error.message.replace(/\$2[abxy]\$[^\s"'`,;)}\]]*/g, '[REDACTED]');
+}
+
+if (require.main === module) {
+  void main().catch((error: unknown) => {
+    console.error(migrationErrorMessage(error));
+    process.exitCode = 1;
+  });
+}

@@ -45,8 +45,9 @@ export class UserProvisioningService {
     return { user: result.user, passwordAction };
   }
 
-  async provisionUserWithApplicationsWithoutNotification(dto: CreateUserWithAccessDto) {
-    const passwordHash = await this.usersService.createUnavailablePasswordHash();
+  // Internal migration path only; hashes are never accepted through a public DTO.
+  async provisionUserWithApplicationsWithoutNotification(dto: CreateUserWithAccessDto, importedPasswordHash?: string) {
+    const passwordHash = importedPasswordHash ?? (await this.usersService.createUnavailablePasswordHash());
     const user = await this.dataSource.transaction((manager) => this.createProvisionedUser(dto, passwordHash, manager));
     return { user };
   }
