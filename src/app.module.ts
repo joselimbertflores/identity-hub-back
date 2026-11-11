@@ -20,11 +20,11 @@ import { RATE_LIMIT_TTL_MS, RATE_LIMITS } from './config/rate-limit.config';
       validationSchema: environmentValidationSchema,
       isGlobal: true,
       cache: true,
-      validationOptions: {
+      validationOptions: { libraryOptions: {
         abortEarly: false,
         allowUnknown: true,
         convert: true,
-      },
+      } },
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
