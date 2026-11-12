@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { In, Repository } from 'typeorm';
@@ -37,12 +37,9 @@ export class AuthService {
 
   async completeAuthenticatedPasswordChange(
     userId: string,
-    { currentPassword, newPassword, passwordConfirmation }: ChangePasswordDto,
+    { newPassword }: ChangePasswordDto,
   ): Promise<{ sessionId: string }> {
-    if (newPassword !== passwordConfirmation) {
-      throw new BadRequestException('Password confirmation does not match.');
-    }
-    const user = await this.usersService.applyAuthenticatedPasswordChange(userId, currentPassword, newPassword);
+    const user = await this.usersService.applyAuthenticatedPasswordChange(userId, newPassword);
     await this.revokeAllUserSessions(userId);
     const sessionId = await this.createAuthSession(user);
 

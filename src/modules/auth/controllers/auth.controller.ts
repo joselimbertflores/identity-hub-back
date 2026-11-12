@@ -56,6 +56,15 @@ export class AuthController {
   }
 
   @Patch('change-password')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    default: {
+      ttl: RATE_LIMIT_TTL_MS,
+      limit: RATE_LIMITS.PASSWORD_ACTION,
+      // SessionGuard authenticates the user before this route's throttler runs.
+      getTracker: (req) => (req.user as AuthUser).id,
+    },
+  })
   async changePassword(
     @GetAuthUser('id') userId: string,
     @Body() body: ChangePasswordDto,

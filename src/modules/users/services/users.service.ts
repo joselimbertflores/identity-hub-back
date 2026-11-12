@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { Brackets, EntityManager, ILike, QueryFailedError, Repository } from 'typeorm';
@@ -159,21 +159,15 @@ export class UsersService {
 
   async applyAuthenticatedPasswordChange(
     id: string,
-    currentPassword: string,
     newPassword: string,
   ): Promise<Pick<User, 'id' | 'email' | 'fullName' | 'credentialVersion'>> {
     const currentUser = await this.userRepository
       .createQueryBuilder('user')
-      .addSelect(['user.password', 'user.credentialVersion'])
+      .addSelect('user.credentialVersion')
       .where('user.id = :id', { id })
       .getOne();
 
     if (!currentUser) throw new NotFoundException('User not found');
-
-    const currentPasswordIsValid = await bcrypt.compare(currentPassword, currentUser.password);
-    if (!currentPasswordIsValid) {
-      throw new UnauthorizedException('Current password is incorrect');
-    }
 
     const newPasswordHash = await this.encryptPassword(newPassword);
 
@@ -181,18 +175,14 @@ export class UsersService {
       const repository = manager.getRepository(User);
       const user = await repository
         .createQueryBuilder('user')
-        .addSelect(['user.password', 'user.credentialVersion'])
+        .addSelect('user.credentialVersion')
         .setLock('pessimistic_write')
         .where('user.id = :id', { id })
         .getOne();
 
       if (!user) throw new NotFoundException('User not found');
 
-      if (
-        user.password !== currentUser.password ||
-        user.credentialVersion !== currentUser.credentialVersion ||
-        !user.isActive
-      ) {
+      if (user.credentialVersion !== currentUser.credentialVersion || !user.isActive) {
         throw new ConflictException('Credentials changed while processing the request');
       }
 

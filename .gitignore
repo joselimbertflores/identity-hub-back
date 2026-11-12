@@ -5,6 +5,7 @@
 /public
 /keys
 /migration-data/
+*.tsbuildinfo
 
 /public
 

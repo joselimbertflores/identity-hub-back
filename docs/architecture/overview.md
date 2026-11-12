@@ -32,7 +32,9 @@ Una autorización requiere usuario y aplicación activos, además de una asignac
 
 Alta y recuperación comparten el concepto de `password_action_token`: cada usuario tiene como máximo un enlace temporal vigente para establecer una contraseña. Emitir uno nuevo reemplaza al anterior; consumirlo correctamente establece la contraseña y elimina el enlace.
 
-“No puedo acceder” es el mecanismo de recuperación autoservicio, también cuando el enlace de alta venció o no llegó. Solicitarlo no cambia la contraseña ni cierra sesiones. El cambio voluntario sigue disponible en `/change-password` para usuarios autenticados. No existen `mustChangePassword`, reset administrativo ni reenvío administrativo.
+“No puedo acceder” es el mecanismo de recuperación autoservicio, también cuando el enlace de alta venció o no llegó. Solicitarlo no cambia la contraseña ni cierra sesiones. El cambio voluntario requiere una sesión autenticada, afecta solo a esa cuenta y no exige la contraseña anterior. No existen `mustChangePassword`, reset administrativo ni reenvío administrativo.
+
+El límite del cambio voluntario se aplica por usuario autenticado, compartido entre sus sesiones e independiente de la IP. La protección CSRF del endpoint se apoya en `PATCH` y la política CORS existente.
 
 `credentialVersion` invalida sesiones y códigos anteriores tras un cambio real de credenciales. Establecer o cambiar la contraseña elimina enlaces pendientes y revoca las sesiones anteriores con Single Logout; el cambio voluntario crea una nueva sesión para quien lo realiza. Desactivar la cuenta también incrementa la versión, elimina el enlace y revoca sesiones; reactivarla no las restaura. Cambiar el correo invalida el enlace enviado a la dirección anterior.
 
